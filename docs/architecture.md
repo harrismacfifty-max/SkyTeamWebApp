@@ -1,0 +1,164 @@
+# Architektur
+
+## 4-Schichtenmodell
+
+```text
+1. Praesentation
+   Frontend-SPA und PHP-View-Layer
+
+2. API-Schicht
+   Java REST-Endpunkte, JSON-Antwortformat, Auth-Pruefung, CORS
+
+3. Business-Schicht
+   TheorieService, PraxisService, PruefungsService, AusbildungsstatusService
+
+4. Datenzugriff
+   Repository-Interfaces mit Oracle-JDBC- und Demo-Implementierung
+```
+
+## Frontend-SPA
+
+Die SPA liegt in `frontend/assets/app.js` und wird ueber `frontend/index.php` oder `frontend/index.html` geladen. Sie nutzt keine Frameworks, sondern:
+
+- HTML-Templates in JavaScript
+- CSS fuer Layout, Tabs, Tabellen und BPMN-Schrittleisten
+- `fetch()` ueber `frontend/assets/api.js`
+- `localStorage` fuer Session-Token und ausgewaehlten Schueler
+
+Die Navigation erfolgt ohne Seitenneuladung ueber Tabs:
+
+```text
+Dashboard
+Schueler
+Theorie
+Praxis
+Pruefungen
+Abschluss
+```
+
+## PHP-View-Layer
+
+`frontend/index.php` hat bewusst keine Business-Logik. Die Datei setzt nur die API-Basis-URL:
+
+```php
+$apiBase = getenv('API_BASE_URL') ?: 'http://localhost:8080/api';
+```
+
+Damit bleibt PHP ein View-Layer. Die Kommunikation mit dem Backend erfolgt ausschliesslich per JSON/REST.
+
+## Java REST-API
+
+Das Backend nutzt `com.sun.net.httpserver.HttpServer` und startet ueber:
+
+```text
+de.skyteam.flightschool.FlightSchoolApplication
+```
+
+Zentrale API-Klasse:
+
+```text
+backend/src/main/java/de/skyteam/flightschool/api/ApiHandler.java
+```
+
+Verantwortung:
+
+- Routing unter `/api`
+- Authentifizierung fuer schreibende und geschuetzte Endpunkte
+- Request-Parsing
+- Aufruf der Business-Services
+- einheitliches `ApiResponse`-Format
+
+Fehler werden zentral ueber `ErrorHandler` strukturiert beantwortet:
+
+```text
+400 Validierungsfehler
+401 Login fehlt
+404 Entitaet nicht gefunden
+409 fachlicher Konflikt
+500 unerwarteter Fehler
+```
+
+## Business-Services
+
+Die Business-Services enthalten die Fachregeln und keine SQL-Statements:
+
+```text
+TheorieService
+PraxisService
+PruefungsService
+AusbildungsstatusService
+SchuelerService
+AuthService
+```
+
+Wichtige Regeln:
+
+- Theoriepruefung ab 10 Theoriestunden.
+- Praxispruefung ab 10 Flugstunden.
+- Praxisbuchung prueft Fluglehrer, Flugzeug und Wartungsstatus.
+- Nicht bestandene Pruefungen erzeugen Wiederholungsbedarf.
+- Abschluss nur bei bestandener Theorie und Praxis.
+- Status `ABGESCHLOSSEN` wird erst nach Abschlussaktion gesetzt.
+
+## Repository-Schicht
+
+Die Repository-Interfaces kapseln den Datenzugriff:
+
+```text
+SchuelerRepository
+AusbildungsVertragRepository
+KursRepository
+FlugRepository
+PruefungRepository
+PilotRepository
+FlugzeugRepository
+WartungRepository
+AusbildungsStatusRepository
+```
+
+Business-Services haengen nur von diesen Interfaces ab. SQL ist vollstaendig in `repository/jdbc` gekapselt.
+
+## Oracle-Modus
+
+Oracle wird ueber `APP_PROFILE=oracle` aktiviert. Die JDBC-Implementierungen nutzen explizite SQL-Statements gegen die bestehenden Tabellen:
+
+```text
+SCHUELER
+AUSBILDUNG_VERTRAG
+KURSE
+FLUG
+PRUEFUNG
+PILOT
+FLUGZEUG
+WARTUNG
+SCHUELER_UND_PILOT
+FLUG_UND_PILOT
+WARTUNG_UND_FLUGZEUG
+```
+
+Konfiguration erfolgt ueber:
+
+```text
+DB_URL
+DB_USER
+DB_PASSWORD
+DB_DRIVER
+EXTRA_CLASSPATH
+```
+
+## Demo-Modus
+
+Der Demo-Modus wird ueber `APP_PROFILE=dev` aktiviert oder automatisch genutzt, wenn kein Profil gesetzt ist.
+
+Eigenschaften:
+
+- keine externe Datenbank
+- feste Demo-Daten fuer sieben BPMN-relevante Schuelerfaelle
+- Datei-Persistenz fuer manuelle Demo-Aenderungen
+- Persistenzdatei unter `backend/target/dev-data/flight-school-demo.properties`
+
+Die Demo-Implementierungen liegen unter:
+
+```text
+backend/src/main/java/de/skyteam/flightschool/repository/memory
+```
