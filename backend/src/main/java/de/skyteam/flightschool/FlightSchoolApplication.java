@@ -24,6 +24,15 @@ public final class FlightSchoolApplication {
     public static void main(String[] args) throws Exception {
         int port = readPort();
         RepositoryProvider repositories = RepositoryProvider.fromEnvironment();
+        if ("oracle".equals(repositories.profile())) {
+            try {
+                repositories.verifyDatabaseConnection();
+                System.out.println("[OK] Oracle-Verbindungstest erfolgreich (SELECT 1 FROM DUAL).");
+                repositories.inspectDatabaseSchema().forEach(line -> System.out.println("[SCHEMA] " + line));
+            } catch (IllegalStateException exception) {
+                System.err.println("[FEHLER] Oracle-Verbindungstest fehlgeschlagen: " + exception.getMessage());
+            }
+        }
 
         StudentService studentService = new StudentService(repositories.students());
         AircraftService aircraftService = new AircraftService(repositories.aircraft());
@@ -63,6 +72,8 @@ public final class FlightSchoolApplication {
 
         ApiHandler apiHandler = new ApiHandler(
                 ApplicationConfig.defaults(),
+                repositories.profile(),
+                repositories::databaseConnected,
                 new AuthService(),
                 studentService,
                 aircraftService,

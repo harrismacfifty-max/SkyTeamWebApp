@@ -6,8 +6,10 @@
 # Java / Gradle / Maven
 build/
 target/
+backend/target/
 .gradle/
 *.class
+backend/lib/*.jar
 
 # Node / Frontend
 node_modules/
@@ -15,6 +17,7 @@ dist/
 
 # Logs
 *.log
+logs/
 
 # OS
 .DS_Store
@@ -22,8 +25,14 @@ Thumbs.db
 
 # Environment / Secrets
 .env
+.env.*
+!.env.example
 application-local.properties
 application-secret.properties
+application-*.local.properties
+application-*.secret.properties
+*.credentials
+*.secrets
 
 # PHP / local config
 vendor/

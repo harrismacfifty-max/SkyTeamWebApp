@@ -69,7 +69,7 @@ final class JdbcSupport {
     }
 
     static IllegalStateException failure(SQLException exception) {
-        return new IllegalStateException("Database operation failed.", exception);
+        return JdbcConnectionFactory.failure(exception);
     }
 }
 

@@ -1,17 +1,14 @@
 package de.skyteam.flightschool.repository;
 
-import de.skyteam.flightschool.repository.jdbc.JdbcAircraftRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcAusbildungsStatusRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcAusbildungsVertragRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcConnectionFactory;
 import de.skyteam.flightschool.repository.jdbc.JdbcFlugRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcFlugzeugRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcKursRepository;
-import de.skyteam.flightschool.repository.jdbc.JdbcLessonRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcPilotRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcPruefungRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcSchuelerRepository;
-import de.skyteam.flightschool.repository.jdbc.JdbcStudentRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcWartungRepository;
 import de.skyteam.flightschool.repository.memory.DevFlightSchoolData;
 import de.skyteam.flightschool.repository.memory.InMemoryAircraftRepository;
@@ -26,6 +23,7 @@ import de.skyteam.flightschool.repository.memory.InMemoryPruefungRepository;
 import de.skyteam.flightschool.repository.memory.InMemorySchuelerRepository;
 import de.skyteam.flightschool.repository.memory.InMemoryStudentRepository;
 import de.skyteam.flightschool.repository.memory.InMemoryWartungRepository;
+import java.util.List;
 
 public record RepositoryProvider(
         String profile,
@@ -40,17 +38,33 @@ public record RepositoryProvider(
         PilotRepository piloten,
         FlugzeugRepository flugzeuge,
         WartungRepository wartungen,
-        AusbildungsStatusRepository ausbildungsStatus
+        AusbildungsStatusRepository ausbildungsStatus,
+        JdbcConnectionFactory databaseConnections
 ) {
+    private static final List<String> ORACLE_TABLES = List.of(
+            "SCHUELER",
+            "AUSBILDUNG_VERTRAG",
+            "SCHULE",
+            "KURSE",
+            "PRUEFUNG",
+            "FLUG",
+            "PILOT",
+            "FLUGZEUG",
+            "WARTUNG",
+            "SCHUELER_UND_PILOT",
+            "FLUG_UND_PILOT",
+            "WARTUNG_UND_FLUGZEUG"
+    );
+
     public static RepositoryProvider fromEnvironment() {
         String profile = configuredProfile();
         if ("oracle".equalsIgnoreCase(profile)) {
             JdbcConnectionFactory connections = JdbcConnectionFactory.fromEnvironment();
             return new RepositoryProvider(
                     "oracle",
-                    new JdbcStudentRepository(connections),
-                    new JdbcAircraftRepository(connections),
-                    new JdbcLessonRepository(connections),
+                    new InMemoryStudentRepository(),
+                    new InMemoryAircraftRepository(),
+                    new InMemoryLessonRepository(),
                     new JdbcSchuelerRepository(connections),
                     new JdbcAusbildungsVertragRepository(connections),
                     new JdbcKursRepository(connections),
@@ -59,7 +73,8 @@ public record RepositoryProvider(
                     new JdbcPilotRepository(connections),
                     new JdbcFlugzeugRepository(connections),
                     new JdbcWartungRepository(connections),
-                    new JdbcAusbildungsStatusRepository(connections)
+                    new JdbcAusbildungsStatusRepository(connections),
+                    connections
             );
         }
         if (!"dev".equalsIgnoreCase(profile)) {
@@ -79,8 +94,25 @@ public record RepositoryProvider(
                 new InMemoryPilotRepository(data),
                 new InMemoryFlugzeugRepository(data),
                 new InMemoryWartungRepository(data),
-                new InMemoryAusbildungsStatusRepository(data)
+                new InMemoryAusbildungsStatusRepository(data),
+                null
         );
+    }
+
+    public void verifyDatabaseConnection() {
+        if (databaseConnections != null) {
+            databaseConnections.verifyConnection();
+        }
+    }
+
+    public boolean databaseConnected() {
+        return databaseConnections != null && databaseConnections.isConnected();
+    }
+
+    public List<String> inspectDatabaseSchema() {
+        return databaseConnections == null
+                ? List.of()
+                : databaseConnections.inspectSchema(ORACLE_TABLES);
     }
 
     private static String configuredProfile() {

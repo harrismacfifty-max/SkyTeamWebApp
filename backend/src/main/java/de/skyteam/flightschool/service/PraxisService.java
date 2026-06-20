@@ -60,6 +60,24 @@ public final class PraxisService {
         );
     }
 
+    public List<Pilot> verfuegbarePiloten() {
+        return pilotRepository.findAll().stream()
+                .filter(pilot -> isJa(pilot.lehrer()) && isJa(pilot.verfuegbar()))
+                .toList();
+    }
+
+    public List<Flugzeug> verfuegbareFlugzeuge() {
+        return flugzeugRepository.findAll().stream()
+                .filter(flugzeug -> isJa(flugzeug.verfuegbarkeit()))
+                .filter(flugzeug -> {
+                    String status = normalize(flugzeug.status());
+                    return !status.contains("wartung")
+                            && !status.contains("ausser_dienst")
+                            && !status.contains("gesperrt");
+                })
+                .toList();
+    }
+
     public Flug bucheFlugstunde(PraxisBuchungRequest request) {
         validateRequest(request);
         requireSchueler(request.schuelerId());

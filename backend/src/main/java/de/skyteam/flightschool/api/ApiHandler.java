@@ -30,9 +30,12 @@ import de.skyteam.flightschool.service.TheorieService;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 public final class ApiHandler implements HttpHandler {
     private final ApplicationConfig config;
+    private final String profile;
+    private final BooleanSupplier databaseConnected;
     private final AuthService authService;
     private final StudentService studentService;
     private final AircraftService aircraftService;
@@ -46,6 +49,8 @@ public final class ApiHandler implements HttpHandler {
 
     public ApiHandler(
             ApplicationConfig config,
+            String profile,
+            BooleanSupplier databaseConnected,
             AuthService authService,
             StudentService studentService,
             AircraftService aircraftService,
@@ -58,6 +63,8 @@ public final class ApiHandler implements HttpHandler {
             AusbildungsstatusService ausbildungsstatusService
     ) {
         this.config = config;
+        this.profile = profile;
+        this.databaseConnected = databaseConnected;
         this.authService = authService;
         this.studentService = studentService;
         this.aircraftService = aircraftService;
@@ -88,7 +95,10 @@ public final class ApiHandler implements HttpHandler {
         String path = normalize(exchange.getRequestURI().getPath());
 
         if ("GET".equals(method) && "/api/health".equals(path)) {
-            HttpSupport.sendResponse(exchange, 200, ApiJson.success("API erreichbar.", ApiJson.health()));
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "API erreichbar.",
+                    ApiJson.health(profile, databaseConnected.getAsBoolean())
+            ));
             return;
         }
 
@@ -121,6 +131,7 @@ public final class ApiHandler implements HttpHandler {
         }
 
         if ("GET".equals(method) && "/api/dashboard".equals(path)) {
+            requireDevLegacyEndpoint();
             HttpSupport.sendResponse(exchange, 200, ApiJson.success("Dashboard geladen.", ApiJson.dashboard(dashboardService.dashboard())));
             return;
         }
@@ -129,6 +140,22 @@ public final class ApiHandler implements HttpHandler {
 
         if ("GET".equals(method) && "/api/schueler".equals(path)) {
             HttpSupport.sendResponse(exchange, 200, ApiJson.success("Schueler geladen.", ApiJson.schuelerList(schuelerService.findAll())));
+            return;
+        }
+
+        if ("GET".equals(method) && "/api/piloten".equals(path)) {
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "Verfuegbare Piloten geladen.",
+                    ApiJson.piloten(praxisService.verfuegbarePiloten())
+            ));
+            return;
+        }
+
+        if ("GET".equals(method) && "/api/flugzeuge".equals(path)) {
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "Verfuegbare Flugzeuge geladen.",
+                    ApiJson.flugzeuge(praxisService.verfuegbareFlugzeuge())
+            ));
             return;
         }
 
@@ -253,33 +280,39 @@ public final class ApiHandler implements HttpHandler {
         }
 
         if ("GET".equals(method) && "/api/students".equals(path)) {
+            requireDevLegacyEndpoint();
             HttpSupport.sendResponse(exchange, 200, ApiJson.success("Schueler geladen.", ApiJson.students(studentService.list())));
             return;
         }
 
         if ("POST".equals(method) && "/api/students".equals(path)) {
+            requireDevLegacyEndpoint();
             Student student = studentService.create(JsonUtil.parseObject(HttpSupport.readBody(exchange)));
             HttpSupport.sendResponse(exchange, 201, ApiJson.success("Schueler angelegt.", ApiJson.student(student)));
             return;
         }
 
         if ("GET".equals(method) && "/api/aircraft".equals(path)) {
+            requireDevLegacyEndpoint();
             HttpSupport.sendResponse(exchange, 200, ApiJson.success("Flugzeuge geladen.", ApiJson.aircraftList(aircraftService.list())));
             return;
         }
 
         if ("POST".equals(method) && "/api/aircraft".equals(path)) {
+            requireDevLegacyEndpoint();
             Aircraft aircraft = aircraftService.create(JsonUtil.parseObject(HttpSupport.readBody(exchange)));
             HttpSupport.sendResponse(exchange, 201, ApiJson.success("Flugzeug angelegt.", ApiJson.aircraft(aircraft)));
             return;
         }
 
         if ("GET".equals(method) && "/api/lessons".equals(path)) {
+            requireDevLegacyEndpoint();
             HttpSupport.sendResponse(exchange, 200, ApiJson.success("Ausbildungstermine geladen.", ApiJson.lessons(lessonService.list())));
             return;
         }
 
         if ("POST".equals(method) && "/api/lessons".equals(path)) {
+            requireDevLegacyEndpoint();
             Lesson lesson = lessonService.create(JsonUtil.parseObject(HttpSupport.readBody(exchange)));
             HttpSupport.sendResponse(exchange, 201, ApiJson.success("Ausbildungstermin angelegt.", ApiJson.lesson(lesson)));
             return;
@@ -354,6 +387,12 @@ public final class ApiHandler implements HttpHandler {
 
     private boolean isAuthorized(HttpExchange exchange) {
         return authService.isAuthenticated(bearerToken(exchange));
+    }
+
+    private void requireDevLegacyEndpoint() {
+        if (!"dev".equalsIgnoreCase(profile)) {
+            throw new NotFoundException("Dieser Legacy-Endpunkt ist nur im Dev-Profil verfuegbar.");
+        }
     }
 
     private static String bearerToken(HttpExchange exchange) {
