@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpExchange;
 import de.skyteam.flightschool.api.HttpSupport;
 import de.skyteam.flightschool.dto.ApiResponse;
 import java.io.IOException;
+import java.sql.SQLException;
 import java.util.List;
 
 public final class ErrorHandler {
@@ -22,6 +23,15 @@ public final class ErrorHandler {
         if (exception instanceof IllegalArgumentException) {
             HttpSupport.sendResponse(exchange, 400, ApiResponse.failure(
                     "Validierungsfehler.",
+                    List.of(exception.getMessage())
+            ));
+            return;
+        }
+
+        if (exception instanceof IllegalStateException && exception.getCause() instanceof SQLException) {
+            exception.printStackTrace();
+            HttpSupport.sendResponse(exchange, 503, ApiResponse.failure(
+                    "Datenbankzugriff fehlgeschlagen.",
                     List.of(exception.getMessage())
             ));
             return;

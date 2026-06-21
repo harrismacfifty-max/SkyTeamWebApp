@@ -150,6 +150,8 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/theorie/buchen -Headers
 ## Praxis
 
 - `GET /api/praxis/{schuelerId}`
+- `GET /api/piloten` liefert als Fluglehrer markierte, verfuegbare Piloten
+- `GET /api/flugzeuge` liefert laut Verfuegbarkeit und Status buchbare Flugzeuge
 - `POST /api/praxis/buchen`
 - `POST /api/praxis/stornieren`
 - `GET /api/status/{schuelerId}/praxis`

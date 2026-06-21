@@ -28,12 +28,21 @@ Details stehen in [docs/architecture.md](docs/architecture.md).
 - Dev-/Demo-Modus ohne externe Datenbank
 - PowerShell-Launcher fuer lokale Vorfuehrung
 
+## Voraussetzungen
+
+- Windows PowerShell 5.1 oder PowerShell 7
+- JDK 17 oder neuer; `java` und `javac` muessen ueber `PATH` erreichbar sein
+- Optional PHP fuer den lokalen Frontend-HTTP-Server; ohne PHP wird `frontend/index.html` geoeffnet
+- Fuer Oracle: Netzwerkzugriff auf den FH-Datenbankserver und Oracle JDBC `ojdbc11.jar`
+
+Maven ist fuer die mitgelieferten Startskripte nicht erforderlich. `backend/pom.xml` kann alternativ mit einer lokal installierten Maven-Version verwendet werden.
+
 ## Schnellstart
 
 Am einfachsten aus dem Projektverzeichnis:
 
 ```powershell
-cd C:\Users\pasca\Desktop\SkyTeamWebApp
+cd C:\Pfad\zu\SkyTeamWebApp
 .\start-skyteam.ps1
 ```
 
@@ -51,7 +60,7 @@ powershell -ExecutionPolicy Bypass -File .\create-desktop-shortcut.ps1
 Dev-/Demo-Modus:
 
 ```powershell
-cd C:\Users\pasca\Desktop\SkyTeamWebApp
+cd C:\Pfad\zu\SkyTeamWebApp
 $env:APP_PROFILE = "dev"
 powershell -ExecutionPolicy Bypass -File .\backend\run.ps1
 ```
@@ -132,19 +141,32 @@ Danach Backend neu starten.
 
 ## Oracle-Konfiguration
 
-Oracle wird ueber Umgebungsvariablen aktiviert:
+Lege zuerst den JDBC-Treiber hier ab:
+
+```text
+backend/lib/ojdbc11.jar
+```
+
+Die JAR ist ueber `.gitignore` ausgeschlossen. Der empfohlene Start fragt das Passwort verdeckt ab und gibt es ausschliesslich an den gestarteten Prozessbaum weiter:
+
+```powershell
+cd C:\Pfad\zu\SkyTeamWebApp
+.\start-oracle.ps1
+```
+
+Der Launcher verwendet diese Konfiguration:
 
 ```powershell
 $env:APP_PROFILE = "oracle"
-$env:DB_URL = "jdbc:oracle:thin:@//localhost:1521/XEPDB1"
-$env:DB_USER = "skyteam"
-$env:DB_PASSWORD = "<passwort>"
+$env:DB_URL = "jdbc:oracle:thin:@rs03-db-inf-min.ad.fh-bielefeld.de:1521:ORCL"
+$env:DB_USER = "SkyTeam"
 $env:DB_DRIVER = "oracle.jdbc.OracleDriver"
-$env:EXTRA_CLASSPATH = "C:\pfad\zu\ojdbc.jar"
-powershell -ExecutionPolicy Bypass -File .\backend\run.ps1
+$env:EXTRA_CLASSPATH = "<Projekt>\backend\lib\ojdbc11.jar"
 ```
 
-Im Produktiv-/Oracle-Profil werden keine Zugangsdaten im Code erwartet. `DB_PASSWORD` kommt aus der Umgebung. Die Repository-Schicht nutzt die bestehenden Tabellen:
+`DB_PASSWORD` wird von `start-oracle.ps1` mit `Read-Host -AsSecureString` abgefragt. Es wird weder im Quellcode noch in einer Konfigurationsdatei gespeichert. Beim Start prueft das Backend die Verbindung mit `SELECT 1 FROM DUAL` und protokolliert den read-only Schemaabgleich aus `USER_TABLES` und `USER_TAB_COLUMNS`. `/api/health` liefert im Oracle-Profil `profile: oracle` und `databaseConnected: true|false`, aber keine Zugangsdaten.
+
+Die Repository-Schicht nutzt die bestehenden Tabellen:
 
 ```text
 SCHUELER
@@ -159,6 +181,17 @@ SCHUELER_UND_PILOT
 FLUG_UND_PILOT
 WARTUNG_UND_FLUGZEUG
 ```
+
+Das exportierte fachliche Oracle-DDL liegt unter `database/databaseskyteam-oracle-schema.sql`. Der Startabgleich gegen die echten Oracle-Metadaten bestaetigt die verwendeten Schluessel `ID_SCHUELER`, `ID_AUSBILDUNG_VERTRAG`, `ID_KURS`, `ID_PRUEFUNG`, `ID_FLUG`, `ID_PILOT`, `ID_FLUGZEUG` und `ID_WARTUNG`.
+
+## Typische Oracle-Fehler
+
+- `JDBC-Treiber fehlt`: `backend/lib/ojdbc11.jar` fehlt oder `EXTRA_CLASSPATH`/`DB_DRIVER` ist falsch.
+- `Benutzername oder Passwort falsch`: Zugangsdaten erneut eingeben; das Passwort wird nicht protokolliert.
+- `Datenbankserver nicht erreichbar oder DB_URL falsch`: FH-Netz/VPN, Host, Port `1521` und SID `ORCL` pruefen.
+- `Tabelle oder View nicht vorhanden (ORA-00942)`: Schema, Grants und angemeldeten Benutzer pruefen.
+- `Spalte nicht vorhanden oder ungueltig (ORA-00904)`: JDBC-SQL mit dem originalen DDL der fachlichen Tabellen abgleichen.
+- Belegter Port `8080` oder `8000`: den in der Launcher-Meldung genannten Prozess beenden oder andere Ports mit `-BackendPort` und `-FrontendPort` angeben.
 
 ## Wichtigste Endpunkte
 
@@ -177,6 +210,8 @@ GET    /api/status/{schuelerId}/gesamt
 GET    /api/theorie/{schuelerId}
 POST   /api/theorie/buchen
 GET    /api/praxis/{schuelerId}
+GET    /api/piloten
+GET    /api/flugzeuge
 POST   /api/praxis/buchen
 POST   /api/praxis/stornieren
 

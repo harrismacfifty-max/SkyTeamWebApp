@@ -13,9 +13,11 @@ import de.skyteam.flightschool.model.Flug;
 import de.skyteam.flightschool.model.Kurs;
 import de.skyteam.flightschool.model.Lesson;
 import de.skyteam.flightschool.model.LoginResponse;
+import de.skyteam.flightschool.model.Pilot;
 import de.skyteam.flightschool.model.Pruefung;
 import de.skyteam.flightschool.model.Schueler;
 import de.skyteam.flightschool.model.Student;
+import de.skyteam.flightschool.model.Flugzeug;
 import java.util.List;
 
 public final class ApiJson {
@@ -35,8 +37,18 @@ public final class ApiJson {
         return ApiResponse.success(message, JsonUtil.raw(dataJson));
     }
 
-    public static String health() {
-        return JsonUtil.object(JsonUtil.fields("status", "ok"));
+    public static String health(String profile, boolean databaseConnected) {
+        if ("oracle".equalsIgnoreCase(profile)) {
+            return JsonUtil.object(JsonUtil.fields(
+                    "status", "ok",
+                    "profile", "oracle",
+                    "databaseConnected", databaseConnected
+            ));
+        }
+        return JsonUtil.object(JsonUtil.fields(
+                "status", "ok",
+                "profile", profile
+        ));
     }
 
     public static String version(ApplicationConfig config) {
@@ -154,6 +166,36 @@ public final class ApiJson {
 
     public static String fluege(List<Flug> fluege) {
         return JsonUtil.arrayOfJson(fluege.stream().map(ApiJson::flug).toList());
+    }
+
+    public static String piloten(List<Pilot> piloten) {
+        return JsonUtil.arrayOfJson(piloten.stream().map(ApiJson::pilot).toList());
+    }
+
+    public static String pilot(Pilot pilot) {
+        return JsonUtil.object(JsonUtil.fields(
+                "id", pilot.id(),
+                "lizenz", pilot.lizenz(),
+                "lehrer", pilot.lehrer(),
+                "verfuegbar", pilot.verfuegbar(),
+                "name", pilot.name(),
+                "vorname", pilot.vorname(),
+                "telefon", pilot.telefon(),
+                "email", pilot.email()
+        ));
+    }
+
+    public static String flugzeuge(List<Flugzeug> flugzeuge) {
+        return JsonUtil.arrayOfJson(flugzeuge.stream().map(ApiJson::flugzeug).toList());
+    }
+
+    public static String flugzeug(Flugzeug flugzeug) {
+        return JsonUtil.object(JsonUtil.fields(
+                "id", flugzeug.id(),
+                "baujahr", flugzeug.baujahr(),
+                "verfuegbarkeit", flugzeug.verfuegbarkeit(),
+                "status", flugzeug.status()
+        ));
     }
 
     public static String pruefungen(List<Pruefung> pruefungen) {

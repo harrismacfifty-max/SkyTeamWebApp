@@ -20,7 +20,14 @@ function Test-ApiHealth {
     param([int]$Port)
     try {
         $response = Invoke-RestMethod -Uri "http://localhost:$Port/api/health" -TimeoutSec 2
-        return $response.success -eq $true
+        $expectedProfile = if ($env:APP_PROFILE) { $env:APP_PROFILE.ToLowerInvariant() } else { "dev" }
+        if ($response.success -ne $true -or $response.data.profile -ne $expectedProfile) {
+            return $false
+        }
+        if ($expectedProfile -eq "oracle") {
+            return $response.data.databaseConnected -eq $true
+        }
+        return $true
     } catch {
         return $false
     }
@@ -121,6 +128,14 @@ if (Test-ApiHealth -Port $BackendPort) {
         -RedirectStandardError $backendErrLog
 
     if (-not (Wait-ForBackend -Port $BackendPort -Process $backendProcess)) {
+        $failedBackendOwner = Get-PortOwner -Port $BackendPort
+        if ($null -ne $failedBackendOwner) {
+            Stop-Process -Id $failedBackendOwner.Id -Force -ErrorAction SilentlyContinue
+        }
+        $backendProcess.Refresh()
+        if (-not $backendProcess.HasExited) {
+            Stop-Process -Id $backendProcess.Id -Force -ErrorAction SilentlyContinue
+        }
         Write-Error "Backend konnte nicht gestartet werden."
         Show-LogHint -Path $backendOutLog
         Show-LogHint -Path $backendErrLog
