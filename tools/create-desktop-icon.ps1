@@ -1,11 +1,14 @@
 param(
-    [string]$Source = "$env:USERPROFILE\Downloads\Logo_Datenbanken_.png",
+    [string]$Source = "",
     [string]$OutputDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+if (-not $Source) {
+    $Source = Join-Path $projectRoot "assets\skyteam-icon.png"
+}
 if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $projectRoot "assets"
 }
@@ -130,7 +133,9 @@ function Save-Ico {
     }
 }
 
-$sourceBitmap = [System.Drawing.Bitmap]::FromFile($Source)
+$sourceBytes = [System.IO.File]::ReadAllBytes($Source)
+$sourceStream = New-Object System.IO.MemoryStream -ArgumentList (,$sourceBytes)
+$sourceBitmap = [System.Drawing.Bitmap]::FromStream($sourceStream)
 try {
     $bounds = Get-WhiteCircleBounds -Bitmap $sourceBitmap
     $centerX = $bounds.X + ($bounds.Width / 2)
@@ -168,6 +173,7 @@ try {
     Save-Ico -Path $outputIco -PngImages $pngImages.ToArray() -Sizes $sizes
 } finally {
     $sourceBitmap.Dispose()
+    $sourceStream.Dispose()
 }
 
 Write-Host "Icon-PNG erstellt: $outputPng"

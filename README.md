@@ -1,106 +1,183 @@
-# SkyTeam Flight School MVP
+# SkyTeam Flight School WebApp
 
 ## Kurzbeschreibung
 
 SkyTeam Flight School ist eine browserbasierte Single-Page-Application zur Verwaltung eines vereinfachten Flugschulprozesses. Der MVP bildet Schuelerauswahl, Theorieausbildung, Praxisausbildung, Pruefungen, Abschluss und eine BPMN-nahe Prozessanzeige ab.
 
-Die Anwendung ist fuer eine Vorfuehrung ohne Oracle-Datenbank vorbereitet. Im Dev-Modus nutzt das Backend feste Demo-Daten und speichert manuelle Demo-Aenderungen lokal in einer Datei.
+Die Anwendung kann ohne Oracle-Datenbank im Demo-Modus vorgefuehrt werden. Manuelle Demo-Aenderungen wie neue Schueler oder gebuchte/stornierte Theorie- und Praxisstunden werden im Docker-Compose-Start in einem lokalen Docker-Volume gespeichert.
 
-## Architekturuebersicht
+## Architektur
+
+- Frontend-SPA mit HTML, CSS, Vanilla JavaScript und `fetch()`
+- PHP-View-Layer ueber `./frontend/index.php`
+- Java REST-API unter `/api`
+- Business-Services fuer Theorie, Praxis, Pruefung und Ausbildungsstatus
+- Repository-Schicht mit Oracle-JDBC oder Demo-Modus
+- Oracle-Datenbank oder dateibasierter Demo-Modus
+
+Weitere Details stehen in [docs/architecture.md](docs/architecture.md).
+
+## Voraussetzungen
+
+- Git
+- Docker Desktop oder Docker Engine mit Docker Compose
+- optional Java JDK 17 oder neuer fuer lokalen Start ohne Docker
+- optional PHP fuer lokalen Start ohne Docker
+- optional Oracle-Zugang und Oracle JDBC-Treiber
+
+## Start im Demo-Modus
+
+Der empfohlene Startweg ist auf Windows, macOS und Linux gleich:
+
+```bash
+cd <projektverzeichnis>
+docker compose up --build
+```
+
+Danach sind erreichbar:
 
 ```text
-Frontend SPA      HTML/CSS/Vanilla JS, fetch(), Tabs und Prozessanzeige
-PHP View-Layer    frontend/index.php setzt nur die API-Basis-URL
-Java REST-API     HTTP-Server mit JSON-Endpunkten unter /api
-Business-Services Theorie, Praxis, Pruefung, Ausbildungsstatus
-Repository-Layer  Oracle-JDBC oder Dev-In-Memory mit Datei-Persistenz
+Frontend: http://localhost:8081
+Backend:  http://localhost:8080/api/health
 ```
 
-Details stehen in [docs/architecture.md](docs/architecture.md).
+Stoppen:
 
-## Verwendete Technologien
-
-- HTML, CSS, Vanilla JavaScript
-- PHP nur als einfacher View-Layer fuer `index.php`
-- Java 17+ REST-Backend mit `com.sun.net.httpserver.HttpServer`
-- JSON ueber REST
-- Oracle-kompatible JDBC-Repository-Schicht
-- Dev-/Demo-Modus ohne externe Datenbank
-- PowerShell-Launcher fuer lokale Vorfuehrung
-
-## Schnellstart
-
-Am einfachsten aus dem Projektverzeichnis:
-
-```powershell
-cd C:\Users\pasca\Desktop\SkyTeamWebApp
-.\start-skyteam.ps1
+```bash
+docker compose down
 ```
 
-Der Launcher prueft Port `8080`, startet das Backend bei Bedarf im Dev-Modus und oeffnet das Frontend. Wenn PHP nicht installiert ist, wird automatisch `frontend/index.html` genutzt.
+Demo-Daten komplett zuruecksetzen:
 
-Desktop-Shortcut:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\create-desktop-icon.ps1
-powershell -ExecutionPolicy Bypass -File .\create-desktop-shortcut.ps1
+```bash
+docker compose down -v
 ```
 
-## Start Backend
+## Start mit Oracle
 
-Dev-/Demo-Modus:
+Oracle ist optional und wird nicht als Container erzwungen. Fuer eine externe Oracle-Datenbank werden Umgebungsvariablen genutzt.
+Details stehen in [docs/oracle-setup.md](docs/oracle-setup.md).
 
-```powershell
-cd C:\Users\pasca\Desktop\SkyTeamWebApp
-$env:APP_PROFILE = "dev"
-powershell -ExecutionPolicy Bypass -File .\backend\run.ps1
+Beispiel mit Shell-Variablen:
+
+```bash
+cd <projektverzeichnis>
+APP_PROFILE=oracle \
+DB_URL="jdbc:oracle:thin:@//host.docker.internal:1521/XEPDB1" \
+DB_USER="SKYTEAM" \
+DB_PASSWORD="<passwort>" \
+docker compose up --build
 ```
 
-Healthcheck:
+Alternativ eine lokale `.env` aus der Vorlage anlegen:
 
-```powershell
-Invoke-RestMethod http://localhost:8080/api/health
+```bash
+cp .env.example .env
 ```
 
-Tests:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\backend\run-tests.ps1
-```
-
-## Start Frontend
-
-Mit PHP:
-
-```powershell
-cd C:\Users\pasca\Desktop\SkyTeamWebApp
-php -S localhost:8000 -t frontend
-```
-
-Oeffnen:
+Dann `.env` lokal befuellen:
 
 ```text
-http://localhost:8000
+APP_PROFILE=oracle
+DB_URL=jdbc:oracle:thin:@//host.docker.internal:1521/XEPDB1
+DB_USER=SKYTEAM
+DB_PASSWORD=<passwort>
 ```
 
-Ohne PHP:
+Start:
+
+```bash
+docker compose up --build
+```
+
+Falls ein Oracle JDBC-Treiber benoetigt wird, muss er zusaetzlich ins Backend-Image oder per separatem Mount in den Container gebracht und ueber `EXTRA_CLASSPATH` referenziert werden. Echte Zugangsdaten gehoeren nur in die lokale `.env`, nicht ins Repository.
+
+## Start ueber Docker Compose
+
+Die YAML-Konfiguration liegt in `./compose.yaml`.
+
+Services:
+
+```text
+backend   build: ./backend, Port 8080
+frontend  build: ./frontend, Port 8081 -> Container-Port 80
+```
+
+Standardstart:
+
+```bash
+docker compose up --build
+```
+
+Stoppen:
+
+```bash
+docker compose down
+```
+
+## Lokaler Start ohne Docker
+
+Docker Compose bleibt der bevorzugte Weg. Ohne Docker stehen plattformbezogene Startskripte unter `./scripts` bereit.
+
+Windows PowerShell:
 
 ```powershell
-Start-Process .\frontend\index.html
+cd <projektverzeichnis>
+.\scripts\start.ps1
 ```
+
+macOS/Linux Terminal:
+
+```bash
+cd <projektverzeichnis>
+chmod +x scripts/start.sh
+./scripts/start.sh
+```
+
+Die lokalen Skripte starten das Backend im Demo-Modus auf Port `8080` und das Frontend, falls PHP installiert ist, auf Port `8000`. Ohne PHP wird `./frontend/index.html` als Fallback geoeffnet.
+
+Die Skripte koennen Docker Compose auch explizit ausloesen:
+
+```bash
+cd <projektverzeichnis>
+./scripts/start.sh --docker
+```
+
+```powershell
+cd <projektverzeichnis>
+.\scripts\start.ps1 -Docker
+```
+
+## Projektstruktur
+
+```text
+./compose.yaml       Docker-Compose-Start fuer Backend und Frontend
+./backend            Java REST-API, Services, Repositories, Tests, Dockerfile
+./frontend           index.php, index.html, assets, Dockerfile
+./database           Oracle-kompatible SQL-Skripte
+./docs               API, Architektur, BPMN-Mapping, Demo-Skript, Smoke-Test
+./scripts            Plattformneutrale lokale Startskripte
+./assets             Desktop-Icon-Dateien
+./tools              Hilfsskripte fuer Desktop-Icons
+./.env.example       Vorlage fuer lokale Umgebungsvariablen
+```
+
+## Logo austauschen
+
+Das WebApp-Logo liegt unter `./frontend/assets/logo.png` und wird oben links im Header rund dargestellt. Zum Austauschen die Datei durch ein neues PNG ersetzen; das Bild sollte quadratisch sein, damit es im Kreis nicht verzerrt wirkt. Das Favicon liegt optional unter `./frontend/assets/favicon.ico`.
 
 ## Demo-Login
 
 ```text
-Benutzername: demo
-Passwort: demo
+username: demo
+password: demo
 ```
 
 Das Login ist bewusst einfach gehalten. Es gibt keine Rollenpruefung und keine externe Authentifizierung.
 
 ## Demo-Modus
 
-Der Demo-Modus ist Standard, wenn `APP_PROFILE` fehlt oder `dev` ist. Er benoetigt keine Oracle-Verbindung.
+`APP_PROFILE=demo` nutzt feste Beispieldaten und benoetigt keine Oracle-Verbindung. `APP_PROFILE=dev` wird aus Kompatibilitaetsgruenden weiterhin als Alias akzeptiert.
 
 Enthaltene Demo-Faelle:
 
@@ -112,52 +189,6 @@ SC904  Theoriepruefung nicht bestanden
 SC905  Praxispruefung nicht bestanden
 SC906  Theorie und Praxis bestanden, bereit fuer Abschluss
 SC907  Ausbildung abgeschlossen
-```
-
-Demo-Daten enthalten Ausbildungsvertraege, Theoriekurse, Flugstunden, Pruefungen, Piloten, Flugzeuge und Wartungsstatus.
-
-Manuelle Demo-Aenderungen, z.B. neue Schueler oder gebuchte/stornierte Flugstunden, werden gespeichert unter:
-
-```text
-backend/target/dev-data/flight-school-demo.properties
-```
-
-Reset auf Ausgangsdaten:
-
-```powershell
-Remove-Item .\backend\target\dev-data\flight-school-demo.properties
-```
-
-Danach Backend neu starten.
-
-## Oracle-Konfiguration
-
-Oracle wird ueber Umgebungsvariablen aktiviert:
-
-```powershell
-$env:APP_PROFILE = "oracle"
-$env:DB_URL = "jdbc:oracle:thin:@//localhost:1521/XEPDB1"
-$env:DB_USER = "skyteam"
-$env:DB_PASSWORD = "<passwort>"
-$env:DB_DRIVER = "oracle.jdbc.OracleDriver"
-$env:EXTRA_CLASSPATH = "C:\pfad\zu\ojdbc.jar"
-powershell -ExecutionPolicy Bypass -File .\backend\run.ps1
-```
-
-Im Produktiv-/Oracle-Profil werden keine Zugangsdaten im Code erwartet. `DB_PASSWORD` kommt aus der Umgebung. Die Repository-Schicht nutzt die bestehenden Tabellen:
-
-```text
-SCHUELER
-AUSBILDUNG_VERTRAG
-KURSE
-FLUG
-PRUEFUNG
-PILOT
-FLUGZEUG
-WARTUNG
-SCHUELER_UND_PILOT
-FLUG_UND_PILOT
-WARTUNG_UND_FLUGZEUG
 ```
 
 ## Wichtigste Endpunkte
@@ -176,6 +207,7 @@ DELETE /api/schueler/{id}
 GET    /api/status/{schuelerId}/gesamt
 GET    /api/theorie/{schuelerId}
 POST   /api/theorie/buchen
+POST   /api/theorie/stornieren
 GET    /api/praxis/{schuelerId}
 POST   /api/praxis/buchen
 POST   /api/praxis/stornieren
@@ -187,7 +219,7 @@ POST   /api/pruefung/ergebnis
 POST   /api/ausbildung/{schuelerId}/abschliessen
 ```
 
-Alle Antworten nutzen:
+Alle Antworten nutzen das einheitliche `ApiResponse`-Format:
 
 ```json
 {
@@ -199,36 +231,31 @@ Alle Antworten nutzen:
 ```
 
 Weitere Beispiele stehen in [docs/api.md](docs/api.md) und [docs/smoke-test.md](docs/smoke-test.md).
+`GET /api/health` zeigt zusaetzlich `activeProfile`, `databaseMode`, `databaseReachable` und `timestamp`.
 
-## Vorfuehrung
+## Qualitaetspruefung
 
-5-Minuten-Ablauf:
+Die Startskripte pruefen automatisch, ob Textdateien typische falsch dekodierte UTF-8-Zeichenfolgen enthalten. Manuell kann die Pruefung so gestartet werden:
 
-```text
-docs/demo-script.md
+Windows PowerShell:
+
+```powershell
+cd <projektverzeichnis>
+.\scripts\check-encoding.ps1
 ```
 
-BPMN-Zuordnung:
+macOS/Linux Terminal:
 
-```text
-docs/bpmn-mapping.md
+```bash
+cd <projektverzeichnis>
+chmod +x scripts/check-encoding.sh
+./scripts/check-encoding.sh
 ```
 
 ## Bekannte Einschraenkungen
 
 - MVP-Login mit Demo-Benutzer, keine Rollen, kein JWT, keine externe Authentifizierung.
 - Keine E-Mail, keine Zahlung, keine externen Systeme.
-- Dev-Modus ist dateibasiert und nicht fuer parallele Mehrbenutzer-Szenarien gedacht.
-- PHP ist optional; ohne PHP wird `frontend/index.html` direkt geoeffnet.
-- Oracle-Modus ist vorbereitet, benoetigt aber einen passenden Oracle JDBC-Treiber und ein zur vorhandenen SQL-Struktur passendes Schema.
+- Demo-Modus ist dateibasiert und nicht fuer parallele Mehrbenutzer-Szenarien gedacht.
+- Oracle-Modus ist vorbereitet, benoetigt aber einen passenden Oracle JDBC-Treiber und ein zur SQL-Struktur passendes Schema.
 - BPMN wird bewusst als HTML/CSS-Schrittleiste visualisiert, nicht mit einer BPMN-Rendering-Library.
-
-## Projektstruktur
-
-```text
-backend/    Java REST-API, Services, Repositories, Tests
-frontend/   index.php, index.html, assets/app.js, api.js, styles.css
-database/   Oracle-kompatible SQL-Skripte
-docs/       API, Architektur, BPMN-Mapping, Demo-Skript, Smoke-Test
-assets/     Desktop-Icon
-```

@@ -8,6 +8,7 @@ import de.skyteam.flightschool.dto.PraxisStornierungRequest;
 import de.skyteam.flightschool.dto.PruefungAnmeldungRequest;
 import de.skyteam.flightschool.dto.PruefungsErgebnisRequest;
 import de.skyteam.flightschool.dto.TheorieBuchungRequest;
+import de.skyteam.flightschool.dto.TheorieStornierungRequest;
 import de.skyteam.flightschool.error.ErrorHandler;
 import de.skyteam.flightschool.error.NotFoundException;
 import de.skyteam.flightschool.error.UnauthorizedException;
@@ -30,9 +31,13 @@ import de.skyteam.flightschool.service.TheorieService;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 public final class ApiHandler implements HttpHandler {
     private final ApplicationConfig config;
+    private final String activeProfile;
+    private final String databaseMode;
+    private final BooleanSupplier databaseReachable;
     private final AuthService authService;
     private final StudentService studentService;
     private final AircraftService aircraftService;
@@ -46,6 +51,9 @@ public final class ApiHandler implements HttpHandler {
 
     public ApiHandler(
             ApplicationConfig config,
+            String activeProfile,
+            String databaseMode,
+            BooleanSupplier databaseReachable,
             AuthService authService,
             StudentService studentService,
             AircraftService aircraftService,
@@ -58,6 +66,9 @@ public final class ApiHandler implements HttpHandler {
             AusbildungsstatusService ausbildungsstatusService
     ) {
         this.config = config;
+        this.activeProfile = activeProfile;
+        this.databaseMode = databaseMode;
+        this.databaseReachable = databaseReachable;
         this.authService = authService;
         this.studentService = studentService;
         this.aircraftService = aircraftService;
@@ -88,7 +99,10 @@ public final class ApiHandler implements HttpHandler {
         String path = normalize(exchange.getRequestURI().getPath());
 
         if ("GET".equals(method) && "/api/health".equals(path)) {
-            HttpSupport.sendResponse(exchange, 200, ApiJson.success("API erreichbar.", ApiJson.health()));
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "API erreichbar.",
+                    ApiJson.health(activeProfile, databaseMode, databaseReachable.getAsBoolean())
+            ));
             return;
         }
 
@@ -194,6 +208,14 @@ public final class ApiHandler implements HttpHandler {
         if ("POST".equals(method) && "/api/theorie/buchen".equals(path)) {
             Kurs kurs = theorieService.bucheTheoriekurs(theorieRequest(JsonUtil.parseObject(HttpSupport.readBody(exchange))));
             HttpSupport.sendResponse(exchange, 201, ApiJson.success("Theoriekurs gebucht.", ApiJson.kurs(kurs)));
+            return;
+        }
+
+        if ("POST".equals(method) && "/api/theorie/stornieren".equals(path)) {
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "Theoriekurs storniert.",
+                    ApiJson.theorieStornierung(theorieService.storniereTheoriekurs(theorieStornierungRequest(JsonUtil.parseObject(HttpSupport.readBody(exchange)))))
+            ));
             return;
         }
 
@@ -411,6 +433,14 @@ public final class ApiHandler implements HttpHandler {
         return new PraxisStornierungRequest(
                 required(body, "schuelerId"),
                 required(body, "flugId"),
+                optional(body, "grund", "")
+        );
+    }
+
+    private static TheorieStornierungRequest theorieStornierungRequest(Map<String, String> body) {
+        return new TheorieStornierungRequest(
+                required(body, "schuelerId"),
+                required(body, "kursId"),
                 optional(body, "grund", "")
         );
     }

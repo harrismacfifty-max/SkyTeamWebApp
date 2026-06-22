@@ -5,7 +5,10 @@ public record Kurs(
         String schuelerId,
         String typ,
         String lehrer,
-        String tag
+        String tag,
+        int dauerMinuten
 ) {
+    public Kurs(String id, String schuelerId, String typ, String lehrer, String tag) {
+        this(id, schuelerId, typ, lehrer, tag, 60);
+    }
 }
-

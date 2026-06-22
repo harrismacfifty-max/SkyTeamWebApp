@@ -1,0 +1,27 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      - APP_PROFILE=${APP_PROFILE:-demo}
+      - DB_URL=${DB_URL:-}
+      - DB_USER=${DB_USER:-}
+      - DB_PASSWORD=${DB_PASSWORD:-}
+      - DB_DRIVER=${DB_DRIVER:-}
+      - EXTRA_CLASSPATH=${EXTRA_CLASSPATH:-}
+      - DEV_DATA_FILE=/app/data/flight-school-demo.properties
+    volumes:
+      - backend-demo-data:/app/data
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+    environment:
+      - API_BASE_URL=http://localhost:8080/api
+
+volumes:
+  backend-demo-data:

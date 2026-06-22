@@ -1,39 +1,69 @@
 # Smoke-Test MVP
 
-Ziel: Nachweisen, dass die Flight-School-WebApp ohne Oracle im Dev-Modus vorfuehrbar ist und die zentralen Prozessschritte funktionieren.
+Ziel: Nachweisen, dass die Flight-School-WebApp ohne Oracle im Demo-Modus vorfuehrbar ist und die zentralen Prozessschritte funktionieren.
 
-## 1. Backend starten
+## 1. Anwendung starten
 
-```powershell
-cd C:\Users\pasca\Desktop\SkyTeamWebApp
-$env:APP_PROFILE = "dev"
-powershell -ExecutionPolicy Bypass -File .\backend\run.ps1
+Empfohlen ueber Docker Compose, auf Windows, macOS und Linux gleich:
+
+```bash
+cd <projektverzeichnis>
+docker compose up --build
 ```
 
-Healthcheck:
+Frontend:
+
+```text
+http://localhost:8081
+```
+
+Backend-Healthcheck:
+
+```text
+http://localhost:8080/api/health
+```
+
+Healthcheck per Terminal:
+
+```bash
+curl http://localhost:8080/api/health
+```
+
+Alternativ Backend lokal ueber Windows PowerShell:
+
+```powershell
+cd <projektverzeichnis>
+.\scripts\start.ps1 -NoBrowser
+```
+
+Alternativ lokal ueber macOS/Linux Terminal:
+
+```bash
+cd <projektverzeichnis>
+chmod +x scripts/start.sh
+./scripts/start.sh --no-browser
+```
+
+Healthcheck per PowerShell:
 
 ```powershell
 Invoke-RestMethod http://localhost:8080/api/health
 ```
 
-Erwartung: `success = true`, `data.status = ok`.
+Lokales Frontend ohne Docker:
 
-## 2. Frontend starten
-
-Empfohlen ueber Launcher:
-
-```powershell
-cd C:\Users\pasca\Desktop\SkyTeamWebApp
-.\start-skyteam.ps1
+```bash
+cd <projektverzeichnis>
+php -S localhost:8000 -t ./frontend
 ```
 
-Wenn PHP nicht installiert ist, oeffnet der Launcher automatisch:
+Wenn PHP nicht installiert ist, kann direkt geoeffnet werden:
 
 ```text
-frontend/index.html
+./frontend/index.html
 ```
 
-## 3. Login
+## 2. Login
 
 Demo-Zugang:
 
@@ -44,17 +74,29 @@ Passwort: demo
 
 Erwartung: Dashboard wird angezeigt, Schuelerauswahl ist sichtbar.
 
-## 4. Schueler auswaehlen
+Zusaetzliche UI-Erwartung:
 
-In der Schuelerauswahl z.B. `SC906 - Oskar Lange` waehlen.
+- SkyTeam-Logo erscheint oben links.
+- Dashboard ist der aktive Einstiegstab.
+- Statusuebersicht fuer Theorie, Praxis, Pruefung und Ausbildung ist sichtbar.
+
+## 3. Schueler suchen und auswaehlen
+
+UI:
+
+1. Tab `Schueler` oeffnen.
+2. Nach `Oskar`, `Keller` oder einem Ausbildungsstatus filtern.
+3. In der Tabelle z.B. `SC906 - Oskar Lange` waehlen.
+4. Optional Rechtsklick oder Drei-Punkte-Button testen.
 
 Erwartung:
 
 - Dashboard zeigt Gesamtstatus.
+- Aktiver Tab ist klar markiert.
 - BPMN-Prozessanzeige zeigt Ausbildungsverwaltung, Theorie und Praxis getrennt.
 - `SC906` ist fuer Abschluss bereit, aber noch nicht abgeschlossen.
 
-## 5. Theoriekurs buchen
+## 4. Theoriekurs buchen
 
 UI:
 
@@ -63,6 +105,8 @@ UI:
 3. `Theoriekurs buchen` klicken.
 
 Erwartung: Kurs erscheint in der Tabelle, Theoriestunden steigen.
+Fehlerfall-Erwartung: API-Fehler erscheinen als lesbare Meldung im Frontend, nicht als Stacktrace.
+Storno-Erwartung: Der Kurs kann im Theorie-Tab ueber `Stornieren` entfernt werden; die Theoriestunden sinken wieder.
 
 curl:
 
@@ -75,7 +119,29 @@ curl.exe -X POST http://localhost:8080/api/theorie/buchen `
   -d "{\"schuelerId\":\"SC901\",\"thema\":\"Theorie - Smoke Test\",\"termin\":\"2026-10-20\",\"dauerMinuten\":60,\"dozent\":\"Elias Schulz\",\"notizen\":\"Smoke-Test\"}"
 ```
 
-## 6. Flugstunde buchen
+Optionales Storno per PowerShell:
+
+```powershell
+$course = Invoke-RestMethod -Method Post http://localhost:8080/api/theorie/buchen `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType "application/json" `
+  -Body '{"schuelerId":"SC901","thema":"Theorie - Smoke Storno","termin":"2026-10-20","dauerMinuten":60,"dozent":"Elias Schulz","notizen":"Smoke-Test"}'
+
+$courseId = $course.data.id
+Invoke-RestMethod -Method Post http://localhost:8080/api/theorie/stornieren `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType "application/json" `
+  -Body "{`"schuelerId`":`"SC901`",`"kursId`":`"$courseId`",`"grund`":`"Smoke-Test`"}"
+```
+
+Planung:
+
+1. Tab `Planung` oeffnen.
+2. Offene Theorieanfrage in `Geplante Theoriestunden` ziehen.
+3. Die geplante Theoriestunde wieder in `Offene Theorieanfragen` ziehen.
+4. Storno bestaetigen.
+
+## 5. Flugstunde buchen
 
 UI:
 
@@ -92,6 +158,7 @@ Start/Ziel: EDDV
 ```
 
 Erwartung: Flugstunde erscheint in der Tabelle, Flugstunden steigen.
+Fehlerfall-Erwartung: nicht verfuegbare Piloten oder Flugzeuge liefern einen sichtbaren fachlichen Fehler.
 
 curl:
 
@@ -102,7 +169,7 @@ curl.exe -X POST http://localhost:8080/api/praxis/buchen `
   -d "{\"schuelerId\":\"SC901\",\"flugzeugId\":\"FZ002\",\"fluglehrer\":\"P001\",\"termin\":\"2026-10-21T10:00\",\"dauerMinuten\":60,\"ausbildungsinhalt\":\"Smoke-Testflug\",\"notizen\":\"Smoke-Test\"}"
 ```
 
-## 7. Pruefung anmelden
+## 6. Pruefung anmelden
 
 UI:
 
@@ -134,7 +201,7 @@ curl.exe -X POST http://localhost:8080/api/pruefung/praxis/anmelden `
   -d "{\"schuelerId\":\"SC903\",\"pruefungsart\":\"Praxispruefung\",\"wunschtermin\":\"2026-10-23\",\"pruefer\":\"P002\",\"bemerkung\":\"Smoke-Test\"}"
 ```
 
-## 8. Ergebnis speichern
+## 7. Ergebnis speichern
 
 UI:
 
@@ -152,7 +219,7 @@ curl.exe -X POST http://localhost:8080/api/pruefung/ergebnis `
   -d "{\"pruefungId\":\"PRB904\",\"schuelerId\":\"SC906\",\"pruefungsart\":\"Theoriepruefung\",\"datum\":\"2026-10-24\",\"bestanden\":true,\"ergebnisText\":\"Smoke-Test bestanden\",\"notizen\":\"Smoke-Test\"}"
 ```
 
-## 9. Ausbildung abschliessen
+## 8. Ausbildung abschliessen
 
 UI:
 
@@ -161,6 +228,7 @@ UI:
 3. `Ausbildung abschliessen` klicken.
 
 Erwartung: Gesamtstatus wird `ABGESCHLOSSEN`.
+Abschluss pruefen: Dashboard zeigt danach `Ausbildung: Abgeschlossen`, Theorie und Praxis bleiben `Bestanden`.
 
 curl:
 
@@ -218,7 +286,7 @@ Erwartung: `409`, da die Praxispruefung nicht bestanden ist.
 ## Backend-Tests
 
 ```powershell
-cd C:\Users\pasca\Desktop\SkyTeamWebApp
+cd <projektverzeichnis>
 powershell -ExecutionPolicy Bypass -File .\backend\run-tests.ps1
 ```
 

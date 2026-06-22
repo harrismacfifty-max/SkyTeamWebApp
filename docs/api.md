@@ -13,7 +13,11 @@ Alle Antworten nutzen dasselbe Format:
   "success": true,
   "message": "API erreichbar.",
   "data": {
-    "status": "ok"
+    "status": "ok",
+    "activeProfile": "demo",
+    "databaseMode": "demo",
+    "databaseReachable": true,
+    "timestamp": "2026-06-22T10:30:00+02:00"
   },
   "errors": []
 }
@@ -117,6 +121,7 @@ Invoke-RestMethod http://localhost:8080/api/schueler/SC901 -Headers $headers
 
 - `GET /api/theorie/{schuelerId}`
 - `POST /api/theorie/buchen`
+- `POST /api/theorie/stornieren`
 - `GET /api/status/{schuelerId}/theorie`
 
 `TheorieBuchungRequest`:
@@ -145,6 +150,28 @@ $body = @{
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post http://localhost:8080/api/theorie/buchen -Headers $headers -ContentType "application/json" -Body $body
+```
+
+`TheorieStornierungRequest`:
+
+```json
+{
+  "schuelerId": "SC901",
+  "kursId": "KTB951",
+  "grund": "Termin verschoben"
+}
+```
+
+Beispiel:
+
+```powershell
+$body = @{
+  schuelerId = "SC901"
+  kursId = "KTB951"
+  grund = "Termin verschoben"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post http://localhost:8080/api/theorie/stornieren -Headers $headers -ContentType "application/json" -Body $body
 ```
 
 ## Praxis

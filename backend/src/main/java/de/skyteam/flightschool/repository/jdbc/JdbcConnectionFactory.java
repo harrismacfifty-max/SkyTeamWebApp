@@ -3,6 +3,8 @@ package de.skyteam.flightschool.repository.jdbc;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class JdbcConnectionFactory {
     private final String url;
@@ -21,13 +23,14 @@ public final class JdbcConnectionFactory {
             try {
                 Class.forName(driver);
             } catch (ClassNotFoundException exception) {
-                throw new IllegalStateException("DB_DRIVER class was not found: " + driver, exception);
+                throw new IllegalStateException("DB_DRIVER class was not found: " + driver + ". Check EXTRA_CLASSPATH or the Docker image.");
             }
         }
 
-        String url = required("DB_URL");
-        String user = required("DB_USER");
-        String password = required("DB_PASSWORD");
+        requireAll("DB_URL", "DB_USER", "DB_PASSWORD");
+        String url = System.getenv("DB_URL").trim();
+        String user = System.getenv("DB_USER").trim();
+        String password = System.getenv("DB_PASSWORD").trim();
         return new JdbcConnectionFactory(url, user, password);
     }
 
@@ -35,12 +38,27 @@ public final class JdbcConnectionFactory {
         return DriverManager.getConnection(url, user, password);
     }
 
-    private static String required(String name) {
-        String value = System.getenv(name);
-        if (value == null || value.isBlank()) {
-            throw new IllegalStateException(name + " is required for APP_PROFILE=oracle.");
+    public boolean isReachable() {
+        try (Connection connection = open()) {
+            return connection.isValid(2);
+        } catch (SQLException exception) {
+            return false;
         }
-        return value;
+    }
+
+    private static void requireAll(String... names) {
+        List<String> missing = new ArrayList<>();
+        for (String name : names) {
+            String value = System.getenv(name);
+            if (value == null || value.isBlank()) {
+                missing.add(name);
+            }
+        }
+        if (!missing.isEmpty()) {
+            throw new IllegalStateException(
+                    "APP_PROFILE=oracle requires DB_URL, DB_USER and DB_PASSWORD. Missing: " + String.join(", ", missing)
+            );
+        }
     }
 }
 

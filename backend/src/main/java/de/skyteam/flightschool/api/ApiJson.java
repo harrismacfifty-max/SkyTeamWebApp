@@ -7,6 +7,7 @@ import de.skyteam.flightschool.dto.PraxisFortschrittDto;
 import de.skyteam.flightschool.dto.PraxisStornierungResponse;
 import de.skyteam.flightschool.dto.PruefungsErgebnisStatusDto;
 import de.skyteam.flightschool.dto.TheorieFortschrittDto;
+import de.skyteam.flightschool.dto.TheorieStornierungResponse;
 import de.skyteam.flightschool.model.Aircraft;
 import de.skyteam.flightschool.model.Dashboard;
 import de.skyteam.flightschool.model.Flug;
@@ -16,6 +17,7 @@ import de.skyteam.flightschool.model.LoginResponse;
 import de.skyteam.flightschool.model.Pruefung;
 import de.skyteam.flightschool.model.Schueler;
 import de.skyteam.flightschool.model.Student;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 public final class ApiJson {
@@ -35,8 +37,14 @@ public final class ApiJson {
         return ApiResponse.success(message, JsonUtil.raw(dataJson));
     }
 
-    public static String health() {
-        return JsonUtil.object(JsonUtil.fields("status", "ok"));
+    public static String health(String activeProfile, String databaseMode, boolean databaseReachable) {
+        return JsonUtil.object(JsonUtil.fields(
+                "status", "ok",
+                "activeProfile", activeProfile,
+                "databaseMode", databaseMode,
+                "databaseReachable", databaseReachable,
+                "timestamp", OffsetDateTime.now().toString()
+        ));
     }
 
     public static String version(ApplicationConfig config) {
@@ -85,7 +93,8 @@ public final class ApiJson {
                 "schuelerId", kurs.schuelerId(),
                 "typ", kurs.typ(),
                 "lehrer", kurs.lehrer(),
-                "tag", kurs.tag()
+                "tag", kurs.tag(),
+                "dauerMinuten", kurs.dauerMinuten()
         ));
     }
 
@@ -125,6 +134,15 @@ public final class ApiJson {
         return JsonUtil.object(JsonUtil.fields(
                 "schuelerId", response.schuelerId(),
                 "flugId", response.flugId(),
+                "storniert", response.storniert(),
+                "message", response.message()
+        ));
+    }
+
+    public static String theorieStornierung(TheorieStornierungResponse response) {
+        return JsonUtil.object(JsonUtil.fields(
+                "schuelerId", response.schuelerId(),
+                "kursId", response.kursId(),
                 "storniert", response.storniert(),
                 "message", response.message()
         ));

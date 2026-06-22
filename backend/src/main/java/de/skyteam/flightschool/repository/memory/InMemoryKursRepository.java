@@ -24,11 +24,23 @@ public final class InMemoryKursRepository implements KursRepository {
     @Override
     public Kurs createTheorieKurs(TheorieBuchungRequest request) {
         String id = data.nextKursId();
-        Kurs kurs = new Kurs(id, request.schuelerId(), request.thema(), request.dozent(), request.termin());
+        Kurs kurs = new Kurs(id, request.schuelerId(), request.thema(), request.dozent(), request.termin(), request.dauerMinuten());
         data.kurse.put(id, kurs);
         data.addTheorieStunden(request.schuelerId(), request.dauerMinuten() / 60.0);
         data.persist();
         return kurs;
+    }
+
+    @Override
+    public boolean storniereTheorieKurs(String schuelerId, String kursId) {
+        Kurs kurs = data.kurse.get(kursId);
+        if (kurs == null || !kurs.schuelerId().equals(schuelerId)) {
+            return false;
+        }
+        data.kurse.remove(kursId);
+        data.addTheorieStunden(schuelerId, kurs.dauerMinuten() / -60.0);
+        data.persist();
+        return true;
     }
 
     @Override

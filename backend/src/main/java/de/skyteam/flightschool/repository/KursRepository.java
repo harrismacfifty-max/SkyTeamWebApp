@@ -9,6 +9,7 @@ public interface KursRepository {
 
     Kurs createTheorieKurs(TheorieBuchungRequest request);
 
+    boolean storniereTheorieKurs(String schuelerId, String kursId);
+
     double countTheorieStunden(String id);
 }
-

@@ -13,6 +13,7 @@ const TABS = [
   { id: "theory", label: "Theorie" },
   { id: "practice", label: "Praxis" },
   { id: "exams", label: "Prüfungen" },
+  { id: "planning", label: "Planung" },
   { id: "completion", label: "Abschluss" }
 ];
 
@@ -50,17 +51,25 @@ const FIELD_LABELS = {
 };
 
 const PILOT_OPTIONS = [
-  { id: "P001", label: "P001 - Max Mueller" },
-  { id: "P002", label: "P002 - Erika Schmidt" },
-  { id: "P003", label: "P003 - kein Fluglehrer" },
-  { id: "P004", label: "P004 - nicht verfuegbar" }
+  { id: "P001", name: "Max Mueller", license: "FI(A)", available: true, note: "verfuegbar" },
+  { id: "P002", name: "Erika Schmidt", license: "FI(A)", available: true, note: "verfuegbar" },
+  { id: "P003", name: "Lina Weber", license: "PPL(A)", available: false, note: "kein Fluglehrer" },
+  { id: "P004", name: "Tom Neumann", license: "FI(A)", available: false, note: "nicht verfuegbar" }
 ];
 
 const AIRCRAFT_OPTIONS = [
-  { id: "FZ002", label: "FZ002 - einsatzbereit" },
-  { id: "FZ003", label: "FZ003 - einsatzbereit" },
-  { id: "FZ001", label: "FZ001 - in Wartung" },
-  { id: "FZ004", label: "FZ004 - gesperrt" }
+  { id: "FZ002", type: "Cessna 172", status: "einsatzbereit", maintenance: "keine offene Wartung", available: true },
+  { id: "FZ003", type: "Piper PA-28", status: "einsatzbereit", maintenance: "keine offene Wartung", available: true },
+  { id: "FZ001", type: "Cessna 152", status: "in_wartung", maintenance: "100h Kontrolle faellig", available: false },
+  { id: "FZ004", type: "Diamond DA20", status: "gesperrt", maintenance: "gesperrt", available: false }
+];
+
+const PLANNING_COLUMNS = [
+  { id: "open-theory", title: "Offene Theorieanfragen", accepts: ["theory-planned"] },
+  { id: "planned-theory", title: "Geplante Theoriestunden", accepts: ["theory-request"] },
+  { id: "open-practice", title: "Offene Praxisanfragen", accepts: [] },
+  { id: "planned-flights", title: "Geplante Flugstunden", accepts: ["practice-request"] },
+  { id: "exams", title: "Prüfungen", accepts: [] }
 ];
 
 const state = {
@@ -73,6 +82,26 @@ const state = {
   error: "",
   notice: "",
   students: [],
+  studentStatuses: {},
+  studentFilters: {
+    name: "",
+    vorname: "",
+    status: "",
+    contract: ""
+  },
+  tableSearch: {
+    courses: "",
+    exams: ""
+  },
+  practiceSelection: {
+    pilotId: "P001",
+    aircraftId: "FZ002"
+  },
+  examResultSelection: "",
+  repeatMarkers: {},
+  modal: null,
+  contextMenu: null,
+  planningDrag: null,
   selectedStudent: null,
   status: null,
   theorie: null,
@@ -152,6 +181,131 @@ function statusLabel(code) {
 
 function yesNo(value) {
   return value ? "Ja" : "Nein";
+}
+
+function normalizeText(value) {
+  return String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function includesText(value, query) {
+  return normalizeText(value).includes(normalizeText(query));
+}
+
+function pilotById(id) {
+  return PILOT_OPTIONS.find((pilot) => pilot.id === id) || null;
+}
+
+function aircraftById(id) {
+  return AIRCRAFT_OPTIONS.find((aircraft) => aircraft.id === id) || null;
+}
+
+function studentStatus(studentId) {
+  return state.studentStatuses[studentId] || {};
+}
+
+function contractStatus(student) {
+  return studentStatus(student.id).vertragsStatus || "-";
+}
+
+function examStatus(exam) {
+  const type = normalizeText(exam?.typ || "");
+  if (type.includes("nicht bestanden")) {
+    return { label: "Nicht bestanden", tone: "warning" };
+  }
+  if (type.includes("bestanden")) {
+    return { label: "Bestanden", tone: "success" };
+  }
+  return { label: "Angemeldet", tone: "info" };
+}
+
+function theoryWorkflowStatus(status = {}) {
+  if (status.theorieBestanden) {
+    return { label: "Bestanden", tone: "success", detail: "Theorieprüfung bestanden." };
+  }
+  if (status.theoriePruefungFreigeschaltet) {
+    return { label: "Bereit", tone: "info", detail: "Mindeststunden erreicht, Prüfung kann angemeldet werden." };
+  }
+  if (Number(status.theorieStunden || 0) > 0) {
+    return { label: "Offen", tone: "warning", detail: "Theorieausbildung läuft, Mindeststunden fehlen noch." };
+  }
+  return { label: "Offen", tone: "neutral", detail: "Noch keine Theoriestunden erfasst." };
+}
+
+function practiceWorkflowStatus(status = {}) {
+  if (status.praxisBestanden) {
+    return { label: "Bestanden", tone: "success", detail: "Praxisprüfung bestanden." };
+  }
+  if (status.praxisPruefungFreigeschaltet) {
+    return { label: "Bereit", tone: "info", detail: "Mindestflugstunden erreicht, Prüfung kann angemeldet werden." };
+  }
+  if (Number(status.flugStunden || 0) > 0) {
+    return { label: "Offen", tone: "warning", detail: "Praxisausbildung läuft, Mindestflugstunden fehlen noch." };
+  }
+  return { label: "Offen", tone: "neutral", detail: "Noch keine Flugstunden erfasst." };
+}
+
+function examWorkflowStatus(status = {}, exams = []) {
+  if (exams.some(isFailedExam)) {
+    return { label: "Nicht bestanden", tone: "warning", detail: "Mindestens eine Prüfung muss wiederholt werden." };
+  }
+  if (status.theorieBestanden && status.praxisBestanden) {
+    return { label: "Bestanden", tone: "success", detail: "Theorie und Praxis sind bestanden." };
+  }
+  if (exams.length > 0) {
+    return { label: "Angemeldet", tone: "info", detail: `${exams.length} Prüfung(en) erfasst.` };
+  }
+  return { label: "Offen", tone: "neutral", detail: "Noch keine Prüfung angemeldet." };
+}
+
+function trainingWorkflowStatus(status = {}) {
+  if (status.status === "ABGESCHLOSSEN") {
+    return { label: "Abgeschlossen", tone: "success", detail: "Ausbildung ist abgeschlossen." };
+  }
+  if (status.status === "ABGEBROCHEN") {
+    return { label: "Abgebrochen", tone: "warning", detail: "Ausbildung wurde abgebrochen." };
+  }
+  if (status.status === "NICHT_GESTARTET") {
+    return { label: "Nicht gestartet", tone: "neutral", detail: "Ausbildung wurde noch nicht begonnen." };
+  }
+  return { label: statusLabel(status.status || "AKTIV"), tone: "info", detail: "Ausbildung ist aktiv." };
+}
+
+function isFailedExam(exam) {
+  return examStatus(exam).label === "Nicht bestanden";
+}
+
+function contextButton(type, id, label = "Weitere Aktionen") {
+  return `
+    <button class="icon-button" type="button" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"
+      data-context-trigger="${escapeHtml(type)}" data-context-id="${escapeHtml(id)}">
+      ...
+    </button>
+  `;
+}
+
+function contextMenuPosition(x, y) {
+  const width = 240;
+  const height = 260;
+  const margin = 10;
+  return {
+    x: Math.max(margin, Math.min(x, window.innerWidth - width - margin)),
+    y: Math.max(margin, Math.min(y, window.innerHeight - height - margin))
+  };
+}
+
+function openContextMenu(type, id, x, y) {
+  state.contextMenu = {
+    type,
+    id,
+    ...contextMenuPosition(x, y)
+  };
+  render();
+}
+
+function closeContextMenu() {
+  if (state.contextMenu) {
+    state.contextMenu = null;
+  }
 }
 
 function progressPercent(current, target) {
@@ -493,12 +647,51 @@ function setMessage(type, message) {
   state.notice = type === "notice" ? message : "";
 }
 
+function sanitizeErrorMessage(message) {
+  const text = String(message || "").split(/\r?\n/)[0].trim();
+  if (!text) {
+    return "Aktion konnte nicht ausgeführt werden.";
+  }
+  if (/exception|stacktrace|\bat\s+|java\.|nullpointer|sqlexception|runtimeexception/i.test(text)) {
+    return "Die Aktion konnte nicht verarbeitet werden. Bitte Eingaben prüfen oder Backend-Status kontrollieren.";
+  }
+  return text.length > 180 ? `${text.slice(0, 177)}...` : text;
+}
+
+function actionMessage() {
+  if (!state.action) {
+    return "";
+  }
+  if (state.view === "theory") {
+    return "Theorieaktion wird verarbeitet...";
+  }
+  if (state.view === "practice") {
+    return "Praxisaktion wird verarbeitet...";
+  }
+  if (state.view === "exams") {
+    return "Prüfungsergebnis wird gespeichert...";
+  }
+  if (state.view === "completion") {
+    return "Ausbildungsstatus wird aktualisiert...";
+  }
+  if (state.view === "students") {
+    return "Schülerdaten werden aktualisiert...";
+  }
+  if (state.view === "planning") {
+    return "Planungsänderung wird gespeichert...";
+  }
+  return "Aktion wird verarbeitet...";
+}
+
 function resetSelectedData() {
   state.selectedStudent = null;
   state.status = null;
   state.theorie = null;
   state.praxis = null;
   state.pruefungen = [];
+  state.examResultSelection = "";
+  state.repeatMarkers = {};
+  state.planningDrag = null;
 }
 
 function clearAuth(message = "") {
@@ -509,6 +702,10 @@ function clearAuth(message = "") {
   state.loading = false;
   state.action = false;
   state.students = [];
+  state.studentStatuses = {};
+  state.contextMenu = null;
+  state.repeatMarkers = {};
+  state.planningDrag = null;
   state.selectedStudentId = "";
   resetSelectedData();
   setMessage(message ? "error" : "notice", message);
@@ -520,7 +717,7 @@ function handleApiError(error) {
     clearAuth("Bitte erneut anmelden.");
     return true;
   }
-  setMessage("error", error.message || "Unerwarteter Fehler.");
+  setMessage("error", sanitizeErrorMessage(error?.message));
   return false;
 }
 
@@ -530,6 +727,14 @@ async function api(path, options) {
 
 async function loadStudents() {
   state.students = await api("/schueler");
+  const statuses = await Promise.all(state.students.map(async (student) => {
+    try {
+      return [student.id, await api(`/status/${encodeURIComponent(student.id)}/gesamt`)];
+    } catch (error) {
+      return [student.id, null];
+    }
+  }));
+  state.studentStatuses = Object.fromEntries(statuses.filter((entry) => entry[1]));
   if (!state.students.some((student) => student.id === state.selectedStudentId)) {
     state.selectedStudentId = state.students[0]?.id || "";
   }
@@ -546,6 +751,7 @@ async function loadSelectedStudentData() {
     return;
   }
 
+  const previousStudentId = state.selectedStudent?.id;
   const id = encodeURIComponent(state.selectedStudentId);
   const [student, status, theorie, praxis, pruefungen] = await Promise.all([
     api(`/schueler/${id}`),
@@ -555,11 +761,18 @@ async function loadSelectedStudentData() {
     api(`/pruefung/${id}`)
   ]);
 
+  if (previousStudentId !== student.id) {
+    state.repeatMarkers = {};
+  }
   state.selectedStudent = student;
   state.status = status;
+  state.studentStatuses[student.id] = status;
   state.theorie = theorie;
   state.praxis = praxis;
   state.pruefungen = pruefungen;
+  if (!pruefungen.some((exam) => exam.id === state.examResultSelection)) {
+    state.examResultSelection = pruefungen[0]?.id || "";
+  }
 }
 
 async function refreshAll({ keepNotice = false } = {}) {
@@ -641,10 +854,13 @@ function renderApplication() {
     <div class="app-shell">
       <header class="app-header">
         <div class="brand">
-          <div class="brand-mark">ST</div>
+          <div class="brand-mark">
+            <img src="assets/logo.png" alt="SkyTeam Logo" onerror="this.closest('.brand-mark').classList.add('logo-missing'); this.remove();">
+            <span aria-hidden="true">ST</span>
+          </div>
           <div>
-            <p class="eyebrow">SkyTeam Flight School</p>
-            <h1>Flugschulprozess</h1>
+            <p class="eyebrow">Flight-School-WebApp</p>
+            <h1>SkyTeam Flight School</h1>
           </div>
         </div>
         <div class="session">
@@ -666,29 +882,118 @@ function renderApplication() {
         ${renderStudentContext()}
         ${state.error ? `<p class="alert error">${escapeHtml(state.error)}</p>` : ""}
         ${state.notice ? `<p class="alert success">${escapeHtml(state.notice)}</p>` : ""}
+        ${state.action ? `<p class="alert info"><span class="mini-spinner"></span>${escapeHtml(actionMessage())}</p>` : ""}
         ${state.loading ? renderLoading() : renderCurrentView()}
       </main>
+      ${renderSelectionModal()}
+      ${renderContextMenu()}
     </div>
   `;
 }
 
+function renderContextMenu() {
+  if (!state.contextMenu) {
+    return "";
+  }
+
+  const items = contextMenuItems(state.contextMenu);
+  if (!items.length) {
+    return "";
+  }
+
+  return `
+    <nav class="context-menu" role="menu" style="left: ${state.contextMenu.x}px; top: ${state.contextMenu.y}px;">
+      ${items.map((item) => `
+        <button type="button" role="menuitem" data-context-action="${escapeHtml(item.action)}"
+          ${item.disabled ? "disabled" : ""} title="${escapeHtml(item.disabled ? item.hint || "" : "")}">
+          <span>${escapeHtml(item.label)}</span>
+          ${item.disabled ? `<small>${escapeHtml(item.hint || "Nicht verfügbar")}</small>` : ""}
+        </button>
+      `).join("")}
+    </nav>
+  `;
+}
+
+function contextMenuItems(menu) {
+  if (menu.type === "student") {
+    const student = state.students.find((entry) => entry.id === menu.id);
+    if (!student) {
+      return [];
+    }
+    return [
+      { action: "student-details", label: "Details anzeigen" },
+      { action: "student-status", label: "Status anzeigen" },
+      { action: "student-theory", label: "Theorie öffnen" },
+      { action: "student-practice", label: "Praxis öffnen" },
+      { action: "student-exams", label: "Prüfungen öffnen" }
+    ];
+  }
+
+  if (menu.type === "course") {
+    const course = state.theorie?.kurse?.find((entry) => entry.id === menu.id);
+    if (!course) {
+      return [];
+    }
+    const unlocked = Boolean(state.theorie?.fortschritt?.theoriePruefungFreigeschaltet || state.status?.theoriePruefungFreigeschaltet);
+    return [
+      { action: "course-details", label: "Details anzeigen" },
+      { action: "course-theory-exam", label: "Prüfung anmelden", disabled: !unlocked || state.action, hint: "Mindeststunden fehlen" },
+      { action: "course-cancel", label: "Stornieren", disabled: state.action, hint: "Aktion läuft" }
+    ];
+  }
+
+  if (menu.type === "flight") {
+    const flight = state.praxis?.fluege?.find((entry) => entry.id === menu.id);
+    if (!flight) {
+      return [];
+    }
+    const unlocked = Boolean(state.praxis?.fortschritt?.praxisPruefungFreigeschaltet || state.status?.praxisPruefungFreigeschaltet);
+    return [
+      { action: "flight-details", label: "Details anzeigen" },
+      { action: "flight-practice-exam", label: "Praxisprüfung anmelden", disabled: !unlocked || state.action, hint: "Mindestflugstunden fehlen" },
+      { action: "flight-cancel", label: "Stornieren", disabled: state.action, hint: "Aktion läuft" }
+    ];
+  }
+
+  if (menu.type === "exam") {
+    const exam = state.pruefungen.find((entry) => entry.id === menu.id);
+    return [
+      { action: "exam-result", label: "Ergebnis speichern", disabled: state.action, hint: "Aktion läuft" },
+      { action: "exam-repeat", label: "Wiederholung markieren", disabled: !exam || !isFailedExam(exam), hint: "Nur bei nicht bestandener Prüfung" }
+    ];
+  }
+
+  if (menu.type === "aircraft") {
+    const aircraft = aircraftById(menu.id);
+    if (!aircraft) {
+      return [];
+    }
+    return [
+      { action: "aircraft-details", label: "Details anzeigen" },
+      { action: "aircraft-maintenance", label: "Wartungsstatus anzeigen" },
+      { action: "aircraft-select", label: "Für Buchung auswählen", disabled: !aircraft?.available || state.action, hint: "Flugzeug nicht verfügbar" }
+    ];
+  }
+
+  return [];
+}
+
 function renderStudentContext() {
+  const student = selectedStudent();
+  const status = student ? studentStatus(student.id) : {};
+  const training = student ? trainingWorkflowStatus(status) : null;
   return `
     <section class="student-context">
       <div>
         <p class="eyebrow">Ausgewählter Schüler</p>
-        <h2>${escapeHtml(studentFullName(selectedStudent()))}</h2>
+        <h2>${escapeHtml(studentFullName(student))}</h2>
+        <div class="badge-row context-badges">
+          ${student ? renderBadge(student.id, "neutral") : ""}
+          ${training ? renderBadge(training.label, training.tone) : ""}
+          ${student ? renderBadge(contractStatus(student), "neutral") : ""}
+        </div>
       </div>
-      <label class="compact-label">
-        Schüler auswählen
-        <select id="studentPicker" ${state.loading || state.action ? "disabled" : ""}>
-          ${state.students.length ? state.students.map((student) => `
-            <option value="${escapeHtml(student.id)}" ${student.id === state.selectedStudentId ? "selected" : ""}>
-              ${escapeHtml(`${student.vorname} ${student.name} (${student.id})`)}
-            </option>
-          `).join("") : `<option value="">Keine Schüler vorhanden</option>`}
-        </select>
-      </label>
+      <button class="button secondary" type="button" data-tab="students">Schueler suchen</button>
     </section>
   `;
 }
@@ -716,6 +1021,8 @@ function renderCurrentView() {
       return renderPracticeView();
     case "exams":
       return renderExamsView();
+    case "planning":
+      return renderPlanningView();
     case "completion":
       return renderCompletionView();
     default:
@@ -732,12 +1039,107 @@ function renderEmptyState(message) {
   `;
 }
 
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
+}
+
+function studentFilterOptions(field) {
+  if (field === "status") {
+    return uniqueValues(state.students.map((student) => studentStatus(student.id).status || ""));
+  }
+  if (field === "contract") {
+    return uniqueValues(state.students.map((student) => contractStatus(student)).filter((value) => value !== "-"));
+  }
+  return [];
+}
+
+function filteredStudents() {
+  const filters = state.studentFilters;
+  return state.students.filter((student) => {
+    const status = studentStatus(student.id);
+    return includesText(student.name, filters.name)
+      && includesText(student.vorname, filters.vorname)
+      && (!filters.status || status.status === filters.status)
+      && (!filters.contract || contractStatus(student) === filters.contract);
+  });
+}
+
+function renderStudentFilters() {
+  return `
+    <div class="filter-grid">
+      <label>Name<input data-student-filter="name" value="${escapeHtml(state.studentFilters.name)}" placeholder="Nachname suchen"></label>
+      <label>Vorname<input data-student-filter="vorname" value="${escapeHtml(state.studentFilters.vorname)}" placeholder="Vorname suchen"></label>
+      <label>Ausbildungsstatus
+        <select data-student-filter="status">
+          <option value="">Alle Status</option>
+          ${studentFilterOptions("status").map((status) => `
+            <option value="${escapeHtml(status)}" ${state.studentFilters.status === status ? "selected" : ""}>${escapeHtml(statusLabel(status))}</option>
+          `).join("")}
+        </select>
+      </label>
+      <label>Vertragsstatus
+        <select data-student-filter="contract">
+          <option value="">Alle Vertragsstatus</option>
+          ${studentFilterOptions("contract").map((status) => `
+            <option value="${escapeHtml(status)}" ${state.studentFilters.contract === status ? "selected" : ""}>${escapeHtml(status)}</option>
+          `).join("")}
+        </select>
+      </label>
+    </div>
+  `;
+}
+
+function filteredByTableSearch(items, key, toText) {
+  const query = state.tableSearch[key] || "";
+  if (!query) {
+    return items;
+  }
+  return items.filter((item) => includesText(toText(item), query));
+}
+
+function renderTableSearch(key, label, placeholder) {
+  return `
+    <label class="table-search">
+      ${escapeHtml(label)}
+      <input data-table-search="${escapeHtml(key)}" value="${escapeHtml(state.tableSearch[key] || "")}" placeholder="${escapeHtml(placeholder)}">
+    </label>
+  `;
+}
+
+function renderStatusSummary(status = {}) {
+  const theory = theoryWorkflowStatus(status);
+  const practice = practiceWorkflowStatus(status);
+  const exams = examWorkflowStatus(status, state.pruefungen);
+  const training = trainingWorkflowStatus(status);
+  const items = [
+    { title: "Theorie", info: theory },
+    { title: "Praxis", info: practice },
+    { title: "Prüfung", info: exams },
+    { title: "Ausbildung", info: training }
+  ];
+  return `
+    <section class="panel status-summary" aria-label="Statusübersicht">
+      ${items.map((item) => `
+        <article>
+          <span>${escapeHtml(item.title)}</span>
+          ${renderBadge(item.info.label, item.info.tone)}
+          <p>${escapeHtml(item.info.detail)}</p>
+        </article>
+      `).join("")}
+    </section>
+  `;
+}
+
 function renderDashboardView() {
   const student = selectedStudent();
   const status = state.status || {};
   const theorie = state.theorie?.fortschritt || {};
   const praxis = state.praxis?.fortschritt || {};
   const canComplete = Boolean(status.theorieBestanden && status.praxisBestanden);
+  const theoryInfo = theoryWorkflowStatus(status);
+  const practiceInfo = practiceWorkflowStatus(status);
+  const examInfo = examWorkflowStatus(status, state.pruefungen);
+  const trainingInfo = trainingWorkflowStatus(status);
 
   return `
     <section class="dashboard-grid">
@@ -747,33 +1149,35 @@ function renderDashboardView() {
           <h2>${escapeHtml(studentFullName(student))}</h2>
           <p class="muted">Vertrag ${escapeHtml(student?.ausbildungsVertragId || "-")} · ${escapeHtml(status.vertragsStatus || "Status unbekannt")}</p>
         </div>
-        ${renderBadge(statusLabel(status.status), status.status === "ABGESCHLOSSEN" ? "success" : "info")}
+        ${renderBadge(trainingInfo.label, trainingInfo.tone)}
       </article>
+
+      ${renderStatusSummary(status)}
 
       <article class="metric-card">
         <span>Ausbildungsstatus</span>
-        <strong>${escapeHtml(statusLabel(status.status))}</strong>
-        <p>${escapeHtml(student?.notiz || "Keine Notiz hinterlegt.")}</p>
+        <strong>${escapeHtml(trainingInfo.label)}</strong>
+        <p>${escapeHtml(trainingInfo.detail)}</p>
       </article>
 
       <article class="metric-card">
         <span>Theorie-Fortschritt</span>
         <strong>${formatHours(theorie.theorieStunden)} h</strong>
         ${renderProgress(theorie.theorieStunden, theorie.mindestTheorieStunden)}
-        ${renderBooleanBadge(theorie.theoriePruefungFreigeschaltet, "Prüfung freigeschaltet", "Noch nicht freigeschaltet")}
+        ${renderBadge(theoryInfo.label, theoryInfo.tone)}
       </article>
 
       <article class="metric-card">
         <span>Praxis-Fortschritt</span>
         <strong>${formatHours(praxis.flugStunden)} h</strong>
         ${renderProgress(praxis.flugStunden, praxis.mindestFlugStunden)}
-        ${renderBooleanBadge(praxis.praxisPruefungFreigeschaltet, "Prüfung freigeschaltet", "Noch nicht freigeschaltet")}
+        ${renderBadge(practiceInfo.label, practiceInfo.tone)}
       </article>
 
       <article class="metric-card">
         <span>Prüfungsstatus</span>
-        <strong>${state.pruefungen.length}</strong>
-        <p>Prüfungen erfasst</p>
+        <strong>${escapeHtml(examInfo.label)}</strong>
+        <p>${escapeHtml(examInfo.detail)}</p>
         <div class="badge-row">
           ${renderBooleanBadge(status.theorieBestanden, "Theorie bestanden", "Theorie offen")}
           ${renderBooleanBadge(status.praxisBestanden, "Praxis bestanden", "Praxis offen")}
@@ -792,8 +1196,232 @@ function renderDashboardView() {
   `;
 }
 
+function planningColumn(id) {
+  return PLANNING_COLUMNS.find((column) => column.id === id) || null;
+}
+
+function planningDropAllowed(cardType, targetColumnId) {
+  const column = planningColumn(targetColumnId);
+  return Boolean(column?.accepts.includes(cardType));
+}
+
+function formatPlanningDate(value) {
+  if (!value) {
+    return "-";
+  }
+  return String(value).includes("T") ? formatDateTime(value) : formatDate(value);
+}
+
+function planningCards() {
+  const student = selectedStudent();
+  if (!student) {
+    return [];
+  }
+
+  const status = state.status || {};
+  const theoryProgress = state.theorie?.fortschritt || {};
+  const practiceProgress = state.praxis?.fortschritt || {};
+  const theoryHours = Number(theoryProgress.theorieStunden ?? status.theorieStunden ?? student.theorieStunden ?? 0);
+  const minTheoryHours = Number(theoryProgress.mindestTheorieStunden ?? 10);
+  const flightHours = Number(practiceProgress.flugStunden ?? status.flugStunden ?? student.flugStunden ?? 0);
+  const minFlightHours = Number(practiceProgress.mindestFlugStunden ?? 10);
+  const blockedByStatus = isCompleted(status) || isAborted(status);
+  const studentName = studentFullName(student);
+  const cards = [];
+
+  if (!status.theorieBestanden) {
+    const missingTheory = Math.max(0, minTheoryHours - theoryHours);
+    cards.push({
+      id: `theory-request-${student.id}`,
+      type: "theory-request",
+      column: "open-theory",
+      studentName,
+      title: missingTheory > 0 ? "Theoriestunde anfragen" : "Theorie optional vertiefen",
+      date: todayDate(1),
+      status: missingTheory > 0 ? `${formatHours(missingTheory)} h bis Mindestumfang` : "Prüfungsvoraussetzung erfüllt",
+      badge: "Theorie",
+      tone: missingTheory > 0 ? "warning" : "success",
+      blocked: blockedByStatus,
+      blockedReason: blockedByStatus ? "Ausbildung nicht mehr aktiv" : "",
+      draggable: !blockedByStatus
+    });
+  }
+
+  (state.theorie?.kurse || []).forEach((course) => {
+    cards.push({
+      id: course.id,
+      type: "theory-planned",
+      column: "planned-theory",
+      studentName,
+      title: course.typ || "Theoriestunde",
+      date: course.tag,
+      status: course.lehrer ? `Dozent: ${course.lehrer}` : "Geplant",
+      badge: "Theorie",
+      tone: "info",
+      blocked: false,
+      draggable: true
+    });
+  });
+
+  if (!status.praxisBestanden) {
+    const missingPractice = Math.max(0, minFlightHours - flightHours);
+    const hasAvailablePilot = PILOT_OPTIONS.some((pilot) => pilot.available);
+    const hasAvailableAircraft = AIRCRAFT_OPTIONS.some((aircraft) => aircraft.available);
+    const blocked = blockedByStatus || !hasAvailablePilot || !hasAvailableAircraft;
+    cards.push({
+      id: `practice-request-${student.id}`,
+      type: "practice-request",
+      column: "open-practice",
+      studentName,
+      title: missingPractice > 0 ? "Flugstunde anfragen" : "Praxis optional vertiefen",
+      date: todayDate(1),
+      status: missingPractice > 0 ? `${formatHours(missingPractice)} h bis Mindestumfang` : "Prüfungsvoraussetzung erfüllt",
+      badge: "Praxis",
+      tone: missingPractice > 0 ? "warning" : "success",
+      blocked,
+      blockedReason: blockedByStatus ? "Ausbildung nicht mehr aktiv" : "Kein verfügbarer Pilot oder kein verfügbares Flugzeug",
+      draggable: !blocked
+    });
+  }
+
+  (state.praxis?.fluege || []).forEach((flight) => {
+    cards.push({
+      id: flight.id,
+      type: "practice-planned",
+      column: "planned-flights",
+      studentName,
+      title: flight.flugArt || "Flugstunde",
+      date: flight.startzeit,
+      status: `${flight.flugzeugId || "-"} · ${flight.startFlughafen || "-"} -> ${flight.zielFlughafen || "-"}`,
+      badge: "Praxis",
+      tone: "info",
+      blocked: false,
+      draggable: false
+    });
+  });
+
+  (state.pruefungen || []).forEach((exam) => {
+    const statusInfo = examStatus(exam);
+    cards.push({
+      id: exam.id,
+      type: "exam",
+      column: "exams",
+      studentName,
+      title: exam.typ || "Prüfung",
+      date: exam.datum,
+      status: statusInfo.label,
+      badge: "Prüfung",
+      tone: statusInfo.tone,
+      blocked: false,
+      draggable: false
+    });
+  });
+
+  const hasTheoryExam = (state.pruefungen || []).some((exam) => normalizeText(exam.typ).includes("theorie"));
+  const hasPracticeExam = (state.pruefungen || []).some((exam) => normalizeText(exam.typ).includes("praxis"));
+  if (!status.theorieBestanden && !hasTheoryExam) {
+    const ready = Boolean(status.theoriePruefungFreigeschaltet);
+    cards.push({
+      id: `theory-exam-placeholder-${student.id}`,
+      type: "exam-placeholder",
+      column: "exams",
+      studentName,
+      title: "Theorieprüfung",
+      date: ready ? "Anmeldung möglich" : "",
+      status: ready ? "Bereit zur Anmeldung" : "Voraussetzungen fehlen",
+      badge: "Prüfung",
+      tone: ready ? "success" : "warning",
+      blocked: !ready,
+      blockedReason: ready ? "" : "Mindest-Theoriestunden fehlen",
+      draggable: false
+    });
+  }
+
+  if (!status.praxisBestanden && !hasPracticeExam) {
+    const ready = Boolean(status.praxisPruefungFreigeschaltet);
+    cards.push({
+      id: `practice-exam-placeholder-${student.id}`,
+      type: "exam-placeholder",
+      column: "exams",
+      studentName,
+      title: "Praxisprüfung",
+      date: ready ? "Anmeldung möglich" : "",
+      status: ready ? "Bereit zur Anmeldung" : "Voraussetzungen fehlen",
+      badge: "Prüfung",
+      tone: ready ? "success" : "warning",
+      blocked: !ready,
+      blockedReason: ready ? "" : "Mindest-Flugstunden fehlen",
+      draggable: false
+    });
+  }
+
+  return cards;
+}
+
+function renderPlanningView() {
+  const student = selectedStudent();
+  const cards = planningCards();
+
+  return `
+    <section class="stack-layout">
+      <div class="panel planning-intro">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Planung</p>
+            <h3>Drag-and-Drop-Planungsboard</h3>
+          </div>
+          ${student ? renderBadge(studentFullName(student), "info") : ""}
+        </div>
+        <p class="muted">
+          Ziehe offene Theorieanfragen in die geplanten Theoriestunden oder offene Praxisanfragen in die geplanten Flugstunden.
+          Vor dem Speichern wird eine Bestätigung angezeigt.
+        </p>
+      </div>
+
+      <section class="planning-board" aria-label="Planungsboard">
+        ${PLANNING_COLUMNS.map((column) => renderPlanningColumn(column, cards.filter((card) => card.column === column.id))).join("")}
+      </section>
+    </section>
+  `;
+}
+
+function renderPlanningColumn(column, cards) {
+  return `
+    <section class="planning-column" data-planning-column="${escapeHtml(column.id)}">
+      <div class="planning-column-head">
+        <h3>${escapeHtml(column.title)}</h3>
+        ${renderBadge(String(cards.length), "neutral")}
+      </div>
+      <div class="planning-card-list">
+        ${cards.length ? cards.map(renderPlanningCard).join("") : `<p class="muted empty-inline">Keine Karten.</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderPlanningCard(card) {
+  const className = `planning-card ${card.blocked ? "blocked" : ""}`;
+  return `
+    <article class="${className}" draggable="${card.draggable ? "true" : "false"}"
+      data-planning-card="${escapeHtml(card.id)}" data-planning-card-type="${escapeHtml(card.type)}">
+      <div class="planning-card-top">
+        ${renderBadge(card.badge, card.tone)}
+        ${card.blocked ? renderBadge("Blockiert", "warning") : ""}
+      </div>
+      <h4>${escapeHtml(card.title)}</h4>
+      <p>${escapeHtml(card.studentName)}</p>
+      <dl>
+        <div><dt>Termin</dt><dd>${escapeHtml(formatPlanningDate(card.date))}</dd></div>
+        <div><dt>Status</dt><dd>${escapeHtml(card.status)}</dd></div>
+      </dl>
+      ${card.blockedReason ? `<p class="blocked-reason">${escapeHtml(card.blockedReason)}</p>` : ""}
+    </article>
+  `;
+}
+
 function renderStudentsView() {
   const student = selectedStudent();
+  const results = filteredStudents();
   return `
     <section class="stack-layout">
       <div class="panel">
@@ -817,7 +1445,9 @@ function renderStudentsView() {
             </select>
           </label>
           <label class="full">Notiz<textarea name="notiz" rows="2" placeholder="Manuell angelegter Demo-Schüler"></textarea></label>
-          <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>Schüler anlegen</button>
+          <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>
+            ${state.action ? "Anlegen läuft..." : "Schüler anlegen"}
+          </button>
         </form>
       </div>
 
@@ -825,12 +1455,16 @@ function renderStudentsView() {
         <div class="panel">
           <div class="section-head">
             <div>
-              <p class="eyebrow">Schüler</p>
-              <h3>Liste</h3>
+            <p class="eyebrow">Schüler</p>
+              <h3>Suche und Liste</h3>
             </div>
-            ${renderBadge(`${state.students.length} geladen`, "neutral")}
+            <div class="badge-row">
+              ${renderBadge(`${results.length} Treffer`, "info")}
+              ${renderBadge(`${state.students.length} geladen`, "neutral")}
+            </div>
           </div>
-          ${state.students.length ? renderStudentsTable() : `<p class="muted">Keine Schüler vorhanden.</p>`}
+          ${renderStudentFilters()}
+          ${state.students.length ? renderStudentsTable(results) : `<p class="muted">Keine Schüler vorhanden.</p>`}
         </div>
 
         <aside class="panel">
@@ -847,7 +1481,10 @@ function renderStudentsView() {
   `;
 }
 
-function renderStudentsTable() {
+function renderStudentsTable(students = state.students) {
+  if (!students.length) {
+    return `<p class="muted empty-inline">Keine Schüler entsprechen den aktuellen Filtern.</p>`;
+  }
   return `
     <div class="table-wrap">
       <table>
@@ -857,18 +1494,24 @@ function renderStudentsTable() {
             <th>Name</th>
             <th>Theorie</th>
             <th>Praxis</th>
+            <th>Status</th>
             <th>Vertrag</th>
             <th>Optionen</th>
           </tr>
         </thead>
         <tbody>
-          ${state.students.map((student) => `
-            <tr class="${student.id === state.selectedStudentId ? "selected-row" : ""}">
+          ${students.map((student) => {
+            const status = studentStatus(student.id);
+            const training = trainingWorkflowStatus(status);
+            return `
+            <tr class="${student.id === state.selectedStudentId ? "selected-row" : ""}"
+              data-context-type="student" data-context-id="${escapeHtml(student.id)}">
               <td><strong>${escapeHtml(student.id)}</strong></td>
               <td>${escapeHtml(studentFullName(student))}</td>
               <td>${formatHours(student.theorieStunden)} h</td>
               <td>${formatHours(student.flugStunden)} h</td>
-              <td>${escapeHtml(student.ausbildungsVertragId || "-")}</td>
+              <td>${renderBadge(training.label, training.tone)}</td>
+              <td>${escapeHtml(contractStatus(student))}</td>
               <td>
                 <div class="row-actions">
                   <button class="button small" type="button" data-select-student="${escapeHtml(student.id)}" ${state.action ? "disabled" : ""}>
@@ -877,10 +1520,11 @@ function renderStudentsTable() {
                   <button class="button small danger" type="button" data-delete-student="${escapeHtml(student.id)}" ${state.action ? "disabled" : ""}>
                     Löschen
                   </button>
+                  ${contextButton("student", student.id, "Schüleraktionen")}
                 </div>
               </td>
             </tr>
-          `).join("")}
+          `;}).join("")}
         </tbody>
       </table>
     </div>
@@ -888,10 +1532,17 @@ function renderStudentsTable() {
 }
 
 function renderStudentDetails(student) {
+  const status = studentStatus(student.id);
+  const theory = theoryWorkflowStatus(status);
+  const practice = practiceWorkflowStatus(status);
+  const training = trainingWorkflowStatus(status);
   return `
     <dl class="details">
       <div><dt>Schüler-ID</dt><dd>${escapeHtml(student.id)}</dd></div>
       <div><dt>Name</dt><dd>${escapeHtml(studentFullName(student))}</dd></div>
+      <div><dt>Status</dt><dd>${renderBadge(training.label, training.tone)}</dd></div>
+      <div><dt>Theorie</dt><dd>${renderBadge(theory.label, theory.tone)}</dd></div>
+      <div><dt>Praxis</dt><dd>${renderBadge(practice.label, practice.tone)}</dd></div>
       <div><dt>Ausbildungsvertrag</dt><dd>${escapeHtml(student.ausbildungsVertragId || "-")}</dd></div>
       <div><dt>Beginn</dt><dd>${formatDate(student.startzeit)}</dd></div>
       <div><dt>Geplantes Ende</dt><dd>${formatDate(student.endzeit)}</dd></div>
@@ -905,7 +1556,9 @@ function renderStudentDetails(student) {
 function renderTheoryView() {
   const progress = state.theorie?.fortschritt || {};
   const courses = state.theorie?.kurse || [];
+  const filteredCourses = filteredByTableSearch(courses, "courses", (course) => `${course.id} ${course.tag} ${course.typ} ${course.lehrer}`);
   const unlocked = Boolean(progress.theoriePruefungFreigeschaltet);
+  const theory = theoryWorkflowStatus(state.status || {});
 
   return `
     <section class="stack-layout">
@@ -916,8 +1569,9 @@ function renderTheoryView() {
           ${renderProgress(progress.theorieStunden, progress.mindestTheorieStunden)}
         </article>
         <article>
-          <span>Theorieprüfung</span>
-          ${renderBooleanBadge(unlocked, "Freigeschaltet", "Noch gesperrt")}
+          <span>Theoriestatus</span>
+          ${renderBadge(theory.label, theory.tone)}
+          <p class="metric-detail">${escapeHtml(theory.detail)}</p>
         </article>
       </div>
 
@@ -930,7 +1584,8 @@ function renderTheoryView() {
             </div>
             ${renderBadge(`${courses.length} Kurse`, "neutral")}
           </div>
-          ${courses.length ? renderCoursesTable(courses) : `<p class="muted">Noch keine Theoriekurse vorhanden.</p>`}
+          ${renderTableSearch("courses", "Kurse durchsuchen", "ID, Thema, Lehrer oder Datum")}
+          ${courses.length ? renderCoursesTable(filteredCourses) : `<p class="muted">Noch keine Theoriekurse vorhanden.</p>`}
         </div>
 
         <div class="panel">
@@ -946,7 +1601,9 @@ function renderTheoryView() {
             <label>Dauer Minuten<input name="dauerMinuten" type="number" min="15" step="15" value="90" required></label>
             <label>Dozent<input name="dozent" placeholder="Elias Schulz" required></label>
             <label class="full">Notizen<textarea name="notizen" rows="3" placeholder="Optionale Hinweise"></textarea></label>
-            <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>Theoriekurs buchen</button>
+            <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>
+              ${state.action ? "Buchung läuft..." : "Theoriekurs buchen"}
+            </button>
           </form>
         </div>
       </section>
@@ -963,7 +1620,9 @@ function renderTheoryView() {
           <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(7)}" required></label>
           <label>Prüfer<input name="pruefer" placeholder="P001"></label>
           <label class="full">Bemerkung<textarea name="bemerkung" rows="2" placeholder="Erstanmeldung"></textarea></label>
-          <button class="button primary full" type="submit" ${!unlocked || state.action ? "disabled" : ""}>Theorieprüfung anmelden</button>
+          <button class="button primary full" type="submit" ${!unlocked || state.action ? "disabled" : ""}>
+            ${state.action ? "Anmeldung läuft..." : "Theorieprüfung anmelden"}
+          </button>
         </form>
       </section>
     </section>
@@ -971,6 +1630,9 @@ function renderTheoryView() {
 }
 
 function renderCoursesTable(courses) {
+  if (!courses.length) {
+    return `<p class="muted empty-inline">Keine Kurse entsprechen der Suche.</p>`;
+  }
   return `
     <div class="table-wrap">
       <table>
@@ -980,15 +1642,26 @@ function renderCoursesTable(courses) {
             <th>Datum</th>
             <th>Thema</th>
             <th>Lehrer</th>
+            <th>Dauer</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           ${courses.map((course) => `
-            <tr>
+            <tr data-context-type="course" data-context-id="${escapeHtml(course.id)}">
               <td><strong>${escapeHtml(course.id)}</strong></td>
               <td>${formatDate(course.tag)}</td>
               <td>${escapeHtml(course.typ)}</td>
               <td>${escapeHtml(course.lehrer)}</td>
+              <td>${Number(course.dauerMinuten || 60)} min</td>
+              <td>
+                <div class="row-actions">
+                  <button class="button small danger" type="button" data-cancel-course="${escapeHtml(course.id)}" ${state.action ? "disabled" : ""}>
+                    Stornieren
+                  </button>
+                  ${contextButton("course", course.id, "Kursaktionen")}
+                </div>
+              </td>
             </tr>
           `).join("")}
         </tbody>
@@ -997,19 +1670,118 @@ function renderCoursesTable(courses) {
   `;
 }
 
+function renderPilotSelection() {
+  const pilot = pilotById(state.practiceSelection.pilotId) || PILOT_OPTIONS[0];
+  return `
+    <div class="entity-picker full">
+      <input type="hidden" name="fluglehrer" value="${escapeHtml(pilot?.id || "")}" required>
+      <div>
+        <span class="field-label">Fluglehrer/Pilot</span>
+        <strong>${escapeHtml(pilot ? `${pilot.id} - ${pilot.name}` : "Kein Pilot ausgewaehlt")}</strong>
+        <p>${pilot ? `${pilot.license} - ${pilot.note}` : "Bitte Pilot auswaehlen."}</p>
+      </div>
+      <button class="button secondary" type="button" data-open-modal="pilot" ${state.action ? "disabled" : ""}>Pilot suchen</button>
+    </div>
+  `;
+}
+
+function renderAircraftSelection() {
+  const aircraft = aircraftById(state.practiceSelection.aircraftId) || AIRCRAFT_OPTIONS.find((entry) => entry.available);
+  return `
+    <div class="entity-picker full">
+      <input type="hidden" name="flugzeugId" value="${escapeHtml(aircraft?.id || "")}" required>
+      <div>
+        <span class="field-label">Flugzeug</span>
+        <strong>${escapeHtml(aircraft ? `${aircraft.id} - ${aircraft.type}` : "Kein Flugzeug ausgewaehlt")}</strong>
+        <p>${aircraft ? `${aircraft.status} - ${aircraft.maintenance}` : "Bitte Flugzeug auswaehlen."}</p>
+      </div>
+      <button class="button secondary" type="button" data-open-modal="aircraft" ${state.action ? "disabled" : ""}>Flugzeug suchen</button>
+    </div>
+  `;
+}
+
+function renderSelectionModal() {
+  if (!state.modal) {
+    return "";
+  }
+  const type = state.modal;
+  const isPilot = type === "pilot";
+  const title = isPilot ? "Fluglehrer auswaehlen" : "Flugzeug auswaehlen";
+  const rows = isPilot ? renderPilotModalRows() : renderAircraftModalRows();
+  return `
+    <div class="modal-backdrop" data-close-modal>
+      <section class="modal-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Auswahl</p>
+            <h3>${escapeHtml(title)}</h3>
+          </div>
+          <button class="button ghost" type="button" data-close-modal>Schliessen</button>
+        </div>
+        <label class="table-search">
+          Suchen
+          <input data-modal-search value="" placeholder="${isPilot ? "Name, ID oder Lizenz" : "ID, Typ, Status oder Wartung"}" autofocus>
+        </label>
+        <div class="table-wrap modal-table">
+          <table>
+            <thead>
+              ${isPilot ? `
+                <tr><th>ID</th><th>Name</th><th>Lizenz</th><th>Verfuegbarkeit</th><th></th></tr>
+              ` : `
+                <tr><th>ID</th><th>Typ</th><th>Status</th><th>Wartung</th><th></th></tr>
+              `}
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderPilotModalRows() {
+  return PILOT_OPTIONS.map((pilot) => `
+    <tr class="${pilot.available ? "" : "disabled-row"}" data-modal-row data-search="${escapeHtml(`${pilot.id} ${pilot.name} ${pilot.license} ${pilot.note}`)}">
+      <td><strong>${escapeHtml(pilot.id)}</strong></td>
+      <td>${escapeHtml(pilot.name)}</td>
+      <td>${escapeHtml(pilot.license)}</td>
+      <td>${renderBadge(pilot.note, pilot.available ? "success" : "warning")}</td>
+      <td>
+        <button class="button small" type="button" data-select-pilot="${escapeHtml(pilot.id)}" ${pilot.available || state.practiceSelection.pilotId === pilot.id ? "" : "disabled"}>
+          ${state.practiceSelection.pilotId === pilot.id ? "Ausgewaehlt" : "Waehlen"}
+        </button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+function renderAircraftModalRows() {
+  return AIRCRAFT_OPTIONS.map((aircraft) => `
+    <tr class="${aircraft.available ? "" : "disabled-row"}" data-modal-row data-search="${escapeHtml(`${aircraft.id} ${aircraft.type} ${aircraft.status} ${aircraft.maintenance}`)}"
+      data-context-type="aircraft" data-context-id="${escapeHtml(aircraft.id)}">
+      <td><strong>${escapeHtml(aircraft.id)}</strong></td>
+      <td>${escapeHtml(aircraft.type)}</td>
+      <td>${renderBadge(aircraft.status, aircraft.available ? "success" : "warning")}</td>
+      <td>${escapeHtml(aircraft.maintenance)}</td>
+      <td>
+        <button class="button small" type="button" data-select-aircraft="${escapeHtml(aircraft.id)}" ${aircraft.available || state.practiceSelection.aircraftId === aircraft.id ? "" : "disabled"}>
+          ${state.practiceSelection.aircraftId === aircraft.id ? "Ausgewaehlt" : "Waehlen"}
+        </button>
+        ${contextButton("aircraft", aircraft.id, "Flugzeugaktionen")}
+      </td>
+    </tr>
+  `).join("");
+}
+
 function renderPracticeView() {
   const progress = state.praxis?.fortschritt || {};
   const flights = state.praxis?.fluege || [];
   const unlocked = Boolean(progress.praxisPruefungFreigeschaltet);
+  const practice = practiceWorkflowStatus(state.status || {});
 
   return `
-    <datalist id="pilotOptions">
-      ${PILOT_OPTIONS.map((pilot) => `<option value="${escapeHtml(pilot.id)}">${escapeHtml(pilot.label)}</option>`).join("")}
-    </datalist>
-    <datalist id="aircraftOptions">
-      ${AIRCRAFT_OPTIONS.map((aircraft) => `<option value="${escapeHtml(aircraft.id)}">${escapeHtml(aircraft.label)}</option>`).join("")}
-    </datalist>
-
     <section class="stack-layout">
       <div class="status-strip">
         <article>
@@ -1018,8 +1790,9 @@ function renderPracticeView() {
           ${renderProgress(progress.flugStunden, progress.mindestFlugStunden)}
         </article>
         <article>
-          <span>Praxisprüfung</span>
-          ${renderBooleanBadge(unlocked, "Freigeschaltet", "Noch gesperrt")}
+          <span>Praxisstatus</span>
+          ${renderBadge(practice.label, practice.tone)}
+          <p class="metric-detail">${escapeHtml(practice.detail)}</p>
         </article>
       </div>
 
@@ -1046,13 +1819,15 @@ function renderPracticeView() {
             <label>Datum<input name="datum" type="date" value="${todayDate(1)}" required></label>
             <label>Startzeit<input name="startzeit" type="time" value="10:00" required></label>
             <label>Endzeit<input name="endzeit" type="time" value="11:00" required></label>
-            <label>Fluglehrer/Pilot<input name="fluglehrer" list="pilotOptions" value="P001" required></label>
-            <label>Flugzeug<input name="flugzeugId" list="aircraftOptions" value="FZ002" required></label>
+            ${renderPilotSelection()}
+            ${renderAircraftSelection()}
             <label>Startflughafen<input name="startFlughafen" value="EDDV" required></label>
             <label>Zielflughafen<input name="zielFlughafen" value="EDDV" required></label>
             <label>Ausbildungsinhalt<input name="ausbildungsinhalt" placeholder="Platzrunde" required></label>
             <label class="full">Notizen<textarea name="notizen" rows="3" placeholder="Optional"></textarea></label>
-            <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>Flugstunde buchen</button>
+            <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>
+              ${state.action ? "Buchung läuft..." : "Flugstunde buchen"}
+            </button>
           </form>
         </div>
       </section>
@@ -1069,7 +1844,9 @@ function renderPracticeView() {
           <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(10)}" required></label>
           <label>Prüfer<input name="pruefer" placeholder="P002"></label>
           <label class="full">Bemerkung<textarea name="bemerkung" rows="2" placeholder="Praxisprüfung"></textarea></label>
-          <button class="button primary full" type="submit" ${!unlocked || state.action ? "disabled" : ""}>Praxisprüfung anmelden</button>
+          <button class="button primary full" type="submit" ${!unlocked || state.action ? "disabled" : ""}>
+            ${state.action ? "Anmeldung läuft..." : "Praxisprüfung anmelden"}
+          </button>
         </form>
       </section>
     </section>
@@ -1092,7 +1869,7 @@ function renderFlightsTable(flights) {
         </thead>
         <tbody>
           ${flights.map((flight) => `
-            <tr>
+            <tr data-context-type="flight" data-context-id="${escapeHtml(flight.id)}">
               <td><strong>${escapeHtml(flight.id)}</strong></td>
               <td>${formatDateTime(flight.startzeit)}<br><span class="muted">bis ${formatDateTime(flight.endzeit)}</span></td>
               <td>${escapeHtml(flight.flugzeugId)}</td>
@@ -1102,6 +1879,7 @@ function renderFlightsTable(flights) {
                 <button class="button small danger" type="button" data-cancel-flight="${escapeHtml(flight.id)}" ${state.action ? "disabled" : ""}>
                   Stornieren
                 </button>
+                ${contextButton("flight", flight.id, "Flugstundenaktionen")}
               </td>
             </tr>
           `).join("")}
@@ -1112,6 +1890,9 @@ function renderFlightsTable(flights) {
 }
 
 function renderExamsView() {
+  const filteredExams = filteredByTableSearch(state.pruefungen, "exams", (exam) => `${exam.id} ${exam.datum} ${exam.typ}`);
+  const selectedExam = state.pruefungen.find((exam) => exam.id === state.examResultSelection) || state.pruefungen[0] || null;
+  const examInfo = examWorkflowStatus(state.status || {}, state.pruefungen);
   return `
     <section class="two-column">
       <div class="panel">
@@ -1119,10 +1900,15 @@ function renderExamsView() {
           <div>
             <p class="eyebrow">Prüfungen</p>
             <h3>Angemeldete Prüfungen</h3>
+            <p class="muted">${escapeHtml(examInfo.detail)}</p>
           </div>
-          ${renderBadge(`${state.pruefungen.length} Prüfungen`, "neutral")}
+          <div class="badge-row">
+            ${renderBadge(`${state.pruefungen.length} Prüfungen`, "neutral")}
+            ${renderBadge(examInfo.label, examInfo.tone)}
+          </div>
         </div>
-        ${state.pruefungen.length ? renderExamsTable() : `<p class="muted">Noch keine Prüfungen vorhanden.</p>`}
+        ${renderTableSearch("exams", "Pruefungen durchsuchen", "ID, Typ, Status oder Datum")}
+        ${state.pruefungen.length ? renderExamsTable(filteredExams) : `<p class="muted">Noch keine Prüfungen vorhanden.</p>`}
       </div>
 
       <aside class="panel">
@@ -1133,14 +1919,12 @@ function renderExamsView() {
           </div>
         </div>
         <form id="examResultForm" class="form-grid single">
-          <label>
-            Prüfung
-            <select name="pruefungId" required ${state.pruefungen.length ? "" : "disabled"}>
-              ${state.pruefungen.map((exam) => `
-                <option value="${escapeHtml(exam.id)}">${escapeHtml(`${exam.id} - ${exam.typ}`)}</option>
-              `).join("")}
-            </select>
-          </label>
+          <input type="hidden" name="pruefungId" value="${escapeHtml(selectedExam?.id || "")}" required>
+          <div class="selected-summary">
+            <span class="field-label">Ausgewaehlte Pruefung</span>
+            <strong>${selectedExam ? escapeHtml(`${selectedExam.id} - ${selectedExam.typ}`) : "Keine Pruefung ausgewaehlt"}</strong>
+            <p>${selectedExam ? formatDate(selectedExam.datum) : "Bitte in der Tabelle eine Pruefung waehlen."}</p>
+          </div>
           <label>
             Prüfungsart
             <select name="pruefungsart" required>
@@ -1158,14 +1942,19 @@ function renderExamsView() {
           </label>
           <label>Ergebnistext<input name="ergebnisText" placeholder="Prüfung bestanden"></label>
           <label>Notizen<textarea name="notizen" rows="3" placeholder="Optionale Details"></textarea></label>
-          <button class="button primary" type="submit" ${!state.pruefungen.length || state.action ? "disabled" : ""}>Ergebnis speichern</button>
+          <button class="button primary" type="submit" ${!state.pruefungen.length || state.action ? "disabled" : ""}>
+            ${state.action ? "Speichern läuft..." : "Ergebnis speichern"}
+          </button>
         </form>
       </aside>
     </section>
   `;
 }
 
-function renderExamsTable() {
+function renderExamsTable(exams = state.pruefungen) {
+  if (!exams.length) {
+    return `<p class="muted empty-inline">Keine Pruefungen entsprechen der Suche.</p>`;
+  }
   return `
     <div class="table-wrap">
       <table>
@@ -1174,16 +1963,30 @@ function renderExamsTable() {
             <th>ID</th>
             <th>Datum</th>
             <th>Typ / Status</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
-          ${state.pruefungen.map((exam) => `
-            <tr>
+          ${exams.map((exam) => {
+            const status = examStatus(exam);
+            return `
+            <tr class="${exam.id === state.examResultSelection ? "selected-row" : ""}"
+              data-context-type="exam" data-context-id="${escapeHtml(exam.id)}">
               <td><strong>${escapeHtml(exam.id)}</strong></td>
               <td>${formatDate(exam.datum)}</td>
-              <td>${escapeHtml(exam.typ)}</td>
+              <td>
+                ${escapeHtml(exam.typ)}<br>
+                ${renderBadge(status.label, status.tone)}
+                ${state.repeatMarkers[exam.id] ? renderBadge("Wiederholung", "warning") : ""}
+              </td>
+              <td>
+                <button class="button small" type="button" data-select-exam="${escapeHtml(exam.id)}" ${state.action ? "disabled" : ""}>
+                  ${exam.id === state.examResultSelection ? "Ausgewaehlt" : "Waehlen"}
+                </button>
+                ${contextButton("exam", exam.id, "Prüfungsaktionen")}
+              </td>
             </tr>
-          `).join("")}
+          `;}).join("")}
         </tbody>
       </table>
     </div>
@@ -1194,6 +1997,7 @@ function renderCompletionView() {
   const status = state.status || {};
   const canComplete = Boolean(status.theorieBestanden && status.praxisBestanden);
   const completed = status.status === "ABGESCHLOSSEN";
+  const training = trainingWorkflowStatus(status);
 
   return `
     <section class="two-column">
@@ -1201,9 +2005,9 @@ function renderCompletionView() {
         <div class="section-head">
           <div>
             <p class="eyebrow">Gesamtstatus</p>
-            <h3>${escapeHtml(statusLabel(status.status))}</h3>
+            <h3>${escapeHtml(training.label)}</h3>
           </div>
-          ${renderBadge(status.vertragsStatus || "Unbekannt", completed ? "success" : "neutral")}
+          ${renderBadge(status.vertragsStatus || "Unbekannt", training.tone)}
         </div>
         <dl class="details">
           <div><dt>Theorieprüfung bestanden</dt><dd>${renderBooleanBadge(status.theorieBestanden, "Ja", "Nein")}</dd></div>
@@ -1223,7 +2027,7 @@ function renderCompletionView() {
           Der Abschluss ist nur möglich, wenn Theorie- und Praxisprüfung bestanden sind.
         </p>
         <button class="button primary" type="button" id="completeTrainingButton" ${!canComplete || completed || state.action ? "disabled" : ""}>
-          ${completed ? "Bereits abgeschlossen" : "Ausbildung abschließen"}
+          ${state.action ? "Abschluss läuft..." : completed ? "Bereits abgeschlossen" : "Ausbildung abschließen"}
         </button>
       </aside>
     </section>
@@ -1250,6 +2054,16 @@ function practicePayload(values) {
   const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
   if (durationMinutes <= 0) {
     throw new Error("Die Endzeit muss nach der Startzeit liegen.");
+  }
+
+  const pilot = pilotById(values.fluglehrer);
+  if (!pilot || !pilot.available) {
+    throw new Error("Bitte einen verfuegbaren Fluglehrer auswaehlen.");
+  }
+
+  const aircraft = aircraftById(values.flugzeugId);
+  if (!aircraft || !aircraft.available) {
+    throw new Error("Bitte ein einsatzbereites Flugzeug ohne Wartungshinweis auswaehlen.");
   }
 
   const route = `${values.startFlughafen} → ${values.zielFlughafen}`;
@@ -1382,6 +2196,343 @@ async function logout() {
   clearAuth("");
 }
 
+async function selectStudentForView(studentId, view) {
+  state.selectedStudentId = studentId;
+  if (view) {
+    state.view = view;
+  }
+  localStorage.setItem(STORAGE.selectedStudentId, state.selectedStudentId);
+  await refreshAll();
+}
+
+function showDetails(title, entries) {
+  const lines = entries
+    .filter((entry) => entry.value !== undefined && entry.value !== null && entry.value !== "")
+    .map((entry) => `${entry.label}: ${entry.value}`);
+  window.alert(`${title}\n\n${lines.join("\n")}`);
+}
+
+function showCourseDetails(courseId) {
+  const course = state.theorie?.kurse?.find((entry) => entry.id === courseId);
+  if (!course) {
+    return;
+  }
+  showDetails("Theoriekurs", [
+    { label: "ID", value: course.id },
+    { label: "Datum", value: formatDate(course.tag) },
+    { label: "Thema", value: course.typ },
+    { label: "Lehrer", value: course.lehrer },
+    { label: "Dauer", value: `${Number(course.dauerMinuten || 60)} min` }
+  ]);
+}
+
+function showFlightDetails(flightId) {
+  const flight = state.praxis?.fluege?.find((entry) => entry.id === flightId);
+  if (!flight) {
+    return;
+  }
+  showDetails("Flugstunde", [
+    { label: "ID", value: flight.id },
+    { label: "Beginn", value: formatDateTime(flight.startzeit) },
+    { label: "Ende", value: formatDateTime(flight.endzeit) },
+    { label: "Flugzeug", value: flight.flugzeugId },
+    { label: "Route", value: `${flight.startFlughafen} -> ${flight.zielFlughafen}` },
+    { label: "Inhalt", value: flight.flugArt }
+  ]);
+}
+
+function showAircraftDetails(aircraftId, maintenanceOnly = false) {
+  const aircraft = aircraftById(aircraftId);
+  if (!aircraft) {
+    return;
+  }
+  if (maintenanceOnly) {
+    showDetails("Wartungsstatus", [
+      { label: "Flugzeug", value: aircraft.id },
+      { label: "Status", value: aircraft.status },
+      { label: "Hinweis", value: aircraft.maintenance },
+      { label: "Buchbar", value: aircraft.available ? "Ja" : "Nein" }
+    ]);
+    return;
+  }
+  showDetails("Flugzeug", [
+    { label: "ID", value: aircraft.id },
+    { label: "Typ", value: aircraft.type },
+    { label: "Status", value: aircraft.status },
+    { label: "Wartung", value: aircraft.maintenance },
+    { label: "Buchbar", value: aircraft.available ? "Ja" : "Nein" }
+  ]);
+}
+
+async function registerTheoryExamFromContext() {
+  if (!state.theorie?.fortschritt?.theoriePruefungFreigeschaltet && !state.status?.theoriePruefungFreigeschaltet) {
+    setMessage("error", "Theorieprüfung ist noch nicht freigeschaltet.");
+    render();
+    return;
+  }
+  state.view = "theory";
+  const body = {
+    schuelerId: ensureStudentId(),
+    pruefungsart: "Theoriepruefung",
+    wunschtermin: todayDate(7),
+    pruefer: "",
+    bemerkung: "Anmeldung per Kontextmenü"
+  };
+  await runAction(() => api("/pruefung/theorie/anmelden", { method: "POST", body }), "Theorieprüfung wurde angemeldet.");
+}
+
+async function registerPracticeExamFromContext() {
+  if (!state.praxis?.fortschritt?.praxisPruefungFreigeschaltet && !state.status?.praxisPruefungFreigeschaltet) {
+    setMessage("error", "Praxisprüfung ist noch nicht freigeschaltet.");
+    render();
+    return;
+  }
+  state.view = "practice";
+  const body = {
+    schuelerId: ensureStudentId(),
+    pruefungsart: "Praxispruefung",
+    wunschtermin: todayDate(10),
+    pruefer: "",
+    bemerkung: "Anmeldung per Kontextmenü"
+  };
+  await runAction(() => api("/pruefung/praxis/anmelden", { method: "POST", body }), "Praxisprüfung wurde angemeldet.");
+}
+
+async function cancelFlight(flightId) {
+  const reason = window.prompt("Grund für die Stornierung:", "Termin verschoben");
+  if (reason === null) {
+    return;
+  }
+  const body = {
+    schuelerId: ensureStudentId(),
+    flugId: flightId,
+    grund: reason
+  };
+  await runAction(() => api("/praxis/stornieren", { method: "POST", body }), "Flugstunde wurde storniert.");
+}
+
+async function cancelCourse(courseId) {
+  const reason = window.prompt("Grund für die Stornierung:", "Termin verschoben");
+  if (reason === null) {
+    return;
+  }
+  await cancelCourseWithReason(courseId, reason, "Theoriestunde wurde storniert.");
+}
+
+async function cancelCourseFromPlanning(courseId) {
+  const student = selectedStudent();
+  if (!window.confirm(`Theoriestunde ${courseId} wieder aus der Planung herausziehen und stornieren?`)) {
+    return;
+  }
+  const reason = student
+    ? `Per Planungsboard fuer ${studentFullName(student)} zurueckgezogen`
+    : "Per Planungsboard zurueckgezogen";
+  await cancelCourseWithReason(courseId, reason, "Theoriestunde wurde aus der Planung entfernt.");
+}
+
+async function cancelCourseWithReason(courseId, reason, successMessage) {
+  const body = {
+    schuelerId: ensureStudentId(),
+    kursId: courseId,
+    grund: reason
+  };
+  await runAction(() => api("/theorie/stornieren", { method: "POST", body }), successMessage);
+}
+
+function selectExamForResult(examId) {
+  state.examResultSelection = examId;
+  state.view = "exams";
+  setMessage("notice", "Prüfung ausgewählt. Ergebnis kann rechts gespeichert werden.");
+  render();
+}
+
+function markExamRepeat(examId) {
+  const exam = state.pruefungen.find((entry) => entry.id === examId);
+  state.examResultSelection = examId;
+  state.view = "exams";
+  if (exam && isFailedExam(exam)) {
+    state.repeatMarkers[examId] = true;
+    setMessage("notice", "Wiederholungsbedarf ist durch das nicht bestandene Ergebnis markiert.");
+  } else {
+    setMessage("error", "Wiederholung kann nur bei nicht bestandenen Prüfungen markiert werden.");
+  }
+  render();
+}
+
+function selectAircraftForBooking(aircraftId) {
+  const aircraft = aircraftById(aircraftId);
+  if (!aircraft?.available) {
+    setMessage("error", "Dieses Flugzeug ist nicht für Buchungen verfügbar.");
+    render();
+    return;
+  }
+  state.practiceSelection.aircraftId = aircraft.id;
+  state.view = "practice";
+  state.modal = null;
+  setMessage("notice", `${aircraft.id} wurde für die nächste Praxisbuchung ausgewählt.`);
+  render();
+}
+
+function availablePilot() {
+  return pilotById(state.practiceSelection.pilotId)?.available
+    ? pilotById(state.practiceSelection.pilotId)
+    : PILOT_OPTIONS.find((pilot) => pilot.available);
+}
+
+function availableAircraft() {
+  return aircraftById(state.practiceSelection.aircraftId)?.available
+    ? aircraftById(state.practiceSelection.aircraftId)
+    : AIRCRAFT_OPTIONS.find((aircraft) => aircraft.available);
+}
+
+function planningDropError(cardType, targetColumnId) {
+  if (targetColumnId === "open-theory") {
+    return cardType === "theory-planned"
+      ? ""
+      : "In offene Theorieanfragen koennen nur geplante Theoriestunden zurueckgezogen werden.";
+  }
+  if (targetColumnId === "planned-theory") {
+    return cardType === "theory-request"
+      ? ""
+      : "In geplante Theoriestunden dürfen nur Theorieanfragen verschoben werden.";
+  }
+  if (targetColumnId === "planned-flights") {
+    return cardType === "practice-request"
+      ? ""
+      : "In geplante Flugstunden dürfen nur Praxisanfragen verschoben werden.";
+  }
+  if (targetColumnId === "exams") {
+    return "Prüfungen werden über die Prüfungsfunktionen angemeldet und können nicht frei verschoben werden.";
+  }
+  return "Diese Verschiebung ist fachlich nicht erlaubt.";
+}
+
+async function planTheoryFromDrop() {
+  const student = selectedStudent();
+  if (!student) {
+    throw new Error("Bitte zuerst einen Schüler auswählen.");
+  }
+  if (!window.confirm(`Statusupdate vorbereiten: Theoriestunde für ${studentFullName(student)} planen und speichern?`)) {
+    return;
+  }
+  const body = {
+    schuelerId: ensureStudentId(),
+    thema: "Planung: Theoriestunde",
+    termin: todayDate(1),
+    dauerMinuten: 60,
+    dozent: "Planungsboard",
+    notizen: "Aus der Planungsansicht erstellt."
+  };
+  await runAction(() => api("/theorie/buchen", { method: "POST", body }), "Theoriestunde wurde aus der Planung erstellt.");
+}
+
+async function planPracticeFromDrop() {
+  const student = selectedStudent();
+  const pilot = availablePilot();
+  const aircraft = availableAircraft();
+  if (!student) {
+    throw new Error("Bitte zuerst einen Schüler auswählen.");
+  }
+  if (!pilot || !aircraft) {
+    throw new Error("Praxisstunde kann nicht geplant werden, weil kein verfügbarer Pilot oder kein verfügbares Flugzeug vorhanden ist.");
+  }
+  if (!window.confirm(`Statusupdate vorbereiten: Flugstunde für ${studentFullName(student)} mit ${pilot.id} und ${aircraft.id} planen und speichern?`)) {
+    return;
+  }
+  const body = {
+    schuelerId: ensureStudentId(),
+    flugzeugId: aircraft.id,
+    fluglehrer: pilot.id,
+    termin: `${todayDate(1)}T10:00`,
+    dauerMinuten: 60,
+    ausbildungsinhalt: "Planung: Flugstunde",
+    startFlughafen: "EDDV",
+    zielFlughafen: "EDDV",
+    notizen: "Aus der Planungsansicht erstellt."
+  };
+  await runAction(() => api("/praxis/buchen", { method: "POST", body }), "Flugstunde wurde aus der Planung erstellt.");
+}
+
+async function handlePlanningDrop(cardType, targetColumnId, cardId) {
+  if (!cardType || !targetColumnId) {
+    return;
+  }
+  if (!planningDropAllowed(cardType, targetColumnId)) {
+    setMessage("error", planningDropError(cardType, targetColumnId));
+    render();
+    return;
+  }
+  if (cardType === "theory-request" && targetColumnId === "planned-theory") {
+    await planTheoryFromDrop();
+    return;
+  }
+  if (cardType === "theory-planned" && targetColumnId === "open-theory") {
+    await cancelCourseFromPlanning(cardId);
+    return;
+  }
+  if (cardType === "practice-request" && targetColumnId === "planned-flights") {
+    await planPracticeFromDrop();
+  }
+}
+
+function clearPlanningDropClasses() {
+  document.querySelectorAll(".planning-column.drag-allowed, .planning-column.drag-blocked").forEach((column) => {
+    column.classList.remove("drag-allowed", "drag-blocked");
+  });
+}
+
+async function handleContextMenuAction(action) {
+  const menu = state.contextMenu;
+  closeContextMenu();
+  if (!menu) {
+    render();
+    return;
+  }
+
+  try {
+    if (action === "student-details") {
+      await selectStudentForView(menu.id, "students");
+    } else if (action === "student-status") {
+      await selectStudentForView(menu.id, "dashboard");
+    } else if (action === "student-theory") {
+      await selectStudentForView(menu.id, "theory");
+    } else if (action === "student-practice") {
+      await selectStudentForView(menu.id, "practice");
+    } else if (action === "student-exams") {
+      await selectStudentForView(menu.id, "exams");
+    } else if (action === "course-details") {
+      showCourseDetails(menu.id);
+      render();
+    } else if (action === "course-theory-exam") {
+      await registerTheoryExamFromContext();
+    } else if (action === "course-cancel") {
+      await cancelCourse(menu.id);
+    } else if (action === "flight-details") {
+      showFlightDetails(menu.id);
+      render();
+    } else if (action === "flight-practice-exam") {
+      await registerPracticeExamFromContext();
+    } else if (action === "flight-cancel") {
+      await cancelFlight(menu.id);
+    } else if (action === "exam-result") {
+      selectExamForResult(menu.id);
+    } else if (action === "exam-repeat") {
+      markExamRepeat(menu.id);
+    } else if (action === "aircraft-details") {
+      showAircraftDetails(menu.id);
+      render();
+    } else if (action === "aircraft-maintenance") {
+      showAircraftDetails(menu.id, true);
+      render();
+    } else if (action === "aircraft-select") {
+      selectAircraftForBooking(menu.id);
+    }
+  } catch (error) {
+    setMessage("error", sanitizeErrorMessage(error?.message || "Kontextaktion konnte nicht ausgeführt werden."));
+    render();
+  }
+}
+
 app.addEventListener("submit", async (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) {
@@ -1407,12 +2558,79 @@ app.addEventListener("submit", async (event) => {
       await handleExamResult(form);
     }
   } catch (error) {
-    setMessage("error", error.message || "Eingaben konnten nicht verarbeitet werden.");
+    setMessage("error", sanitizeErrorMessage(error?.message || "Eingaben konnten nicht verarbeitet werden."));
     render();
   }
 });
 
 app.addEventListener("click", async (event) => {
+  const contextAction = event.target.closest("[data-context-action]");
+  if (contextAction) {
+    await handleContextMenuAction(contextAction.dataset.contextAction);
+    return;
+  }
+
+  const contextTrigger = event.target.closest("[data-context-trigger]");
+  if (contextTrigger) {
+    const rect = contextTrigger.getBoundingClientRect();
+    openContextMenu(
+      contextTrigger.dataset.contextTrigger,
+      contextTrigger.dataset.contextId,
+      rect.left,
+      rect.bottom + 4
+    );
+    return;
+  }
+
+  if (state.contextMenu && !event.target.closest(".context-menu")) {
+    closeContextMenu();
+    render();
+    return;
+  }
+
+  const closeModal = event.target.closest("[data-close-modal]");
+  if (closeModal && (!event.target.closest(".modal-panel") || closeModal.tagName === "BUTTON")) {
+    state.modal = null;
+    render();
+    return;
+  }
+
+  const modalOpenButton = event.target.closest("[data-open-modal]");
+  if (modalOpenButton) {
+    state.modal = modalOpenButton.dataset.openModal;
+    render();
+    return;
+  }
+
+  const pilotButton = event.target.closest("[data-select-pilot]");
+  if (pilotButton) {
+    const pilot = pilotById(pilotButton.dataset.selectPilot);
+    if (pilot?.available) {
+      state.practiceSelection.pilotId = pilot.id;
+      state.modal = null;
+      render();
+    }
+    return;
+  }
+
+  const aircraftButton = event.target.closest("[data-select-aircraft]");
+  if (aircraftButton) {
+    const aircraft = aircraftById(aircraftButton.dataset.selectAircraft);
+    if (aircraft?.available) {
+      state.practiceSelection.aircraftId = aircraft.id;
+      state.modal = null;
+      render();
+    }
+    return;
+  }
+
+  const examButton = event.target.closest("[data-select-exam]");
+  if (examButton) {
+    state.examResultSelection = examButton.dataset.selectExam;
+    render();
+    return;
+  }
+
   const tab = event.target.closest("[data-tab]");
   if (tab) {
     state.view = tab.dataset.tab;
@@ -1423,9 +2641,7 @@ app.addEventListener("click", async (event) => {
 
   const selectButton = event.target.closest("[data-select-student]");
   if (selectButton) {
-    state.selectedStudentId = selectButton.dataset.selectStudent;
-    localStorage.setItem(STORAGE.selectedStudentId, state.selectedStudentId);
-    await refreshAll();
+    await selectStudentForView(selectButton.dataset.selectStudent);
     return;
   }
 
@@ -1449,17 +2665,13 @@ app.addEventListener("click", async (event) => {
 
   const cancelButton = event.target.closest("[data-cancel-flight]");
   if (cancelButton) {
-    const flightId = cancelButton.dataset.cancelFlight;
-    const reason = window.prompt("Grund für die Stornierung:", "Termin verschoben");
-    if (reason === null) {
-      return;
-    }
-    const body = {
-      schuelerId: ensureStudentId(),
-      flugId: flightId,
-      grund: reason
-    };
-    await runAction(() => api("/praxis/stornieren", { method: "POST", body }), "Flugstunde wurde storniert.");
+    await cancelFlight(cancelButton.dataset.cancelFlight);
+    return;
+  }
+
+  const cancelCourseButton = event.target.closest("[data-cancel-course]");
+  if (cancelCourseButton) {
+    await cancelCourse(cancelCourseButton.dataset.cancelCourse);
     return;
   }
 
@@ -1481,13 +2693,144 @@ app.addEventListener("click", async (event) => {
   }
 });
 
-app.addEventListener("change", async (event) => {
-  if (event.target.id !== "studentPicker") {
+app.addEventListener("dragstart", (event) => {
+  const card = event.target.closest("[data-planning-card]");
+  if (!card || card.getAttribute("draggable") !== "true") {
+    event.preventDefault();
     return;
   }
-  state.selectedStudentId = event.target.value;
-  localStorage.setItem(STORAGE.selectedStudentId, state.selectedStudentId);
-  await refreshAll();
+  state.planningDrag = {
+    id: card.dataset.planningCard,
+    type: card.dataset.planningCardType
+  };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", card.dataset.planningCardType || "");
+  card.classList.add("dragging");
+});
+
+app.addEventListener("dragover", (event) => {
+  const column = event.target.closest("[data-planning-column]");
+  if (!column || !state.planningDrag) {
+    return;
+  }
+  event.preventDefault();
+  const allowed = planningDropAllowed(state.planningDrag.type, column.dataset.planningColumn);
+  event.dataTransfer.dropEffect = allowed ? "move" : "none";
+  column.classList.toggle("drag-allowed", allowed);
+  column.classList.toggle("drag-blocked", !allowed);
+});
+
+app.addEventListener("dragleave", (event) => {
+  const column = event.target.closest("[data-planning-column]");
+  const relatedTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+  if (!column || (relatedTarget && column.contains(relatedTarget))) {
+    return;
+  }
+  column.classList.remove("drag-allowed", "drag-blocked");
+});
+
+app.addEventListener("drop", async (event) => {
+  const column = event.target.closest("[data-planning-column]");
+  if (!column || !state.planningDrag) {
+    return;
+  }
+  event.preventDefault();
+  const cardType = state.planningDrag.type;
+  const cardId = state.planningDrag.id;
+  const targetColumnId = column.dataset.planningColumn;
+  clearPlanningDropClasses();
+  state.planningDrag = null;
+  await handlePlanningDrop(cardType, targetColumnId, cardId);
+});
+
+app.addEventListener("dragend", (event) => {
+  const card = event.target.closest("[data-planning-card]");
+  if (card) {
+    card.classList.remove("dragging");
+  }
+  state.planningDrag = null;
+  clearPlanningDropClasses();
+});
+
+function applyModalSearch(input) {
+  const query = input.value;
+  document.querySelectorAll("[data-modal-row]").forEach((row) => {
+    row.hidden = !includesText(row.dataset.search || "", query);
+  });
+}
+
+function renderPreservingControl(control, selector) {
+  const selectionStart = typeof control.selectionStart === "number" ? control.selectionStart : null;
+  const selectionEnd = typeof control.selectionEnd === "number" ? control.selectionEnd : null;
+  render();
+  requestAnimationFrame(() => {
+    const next = document.querySelector(selector);
+    if (!next) {
+      return;
+    }
+    next.focus();
+    if (selectionStart !== null && typeof next.setSelectionRange === "function") {
+      next.setSelectionRange(selectionStart, selectionEnd);
+    }
+  });
+}
+
+app.addEventListener("input", (event) => {
+  const studentFilter = event.target.closest("[data-student-filter]");
+  if (studentFilter) {
+    state.studentFilters[studentFilter.dataset.studentFilter] = studentFilter.value;
+    renderPreservingControl(studentFilter, `[data-student-filter="${studentFilter.dataset.studentFilter}"]`);
+    return;
+  }
+
+  const tableSearch = event.target.closest("[data-table-search]");
+  if (tableSearch) {
+    state.tableSearch[tableSearch.dataset.tableSearch] = tableSearch.value;
+    renderPreservingControl(tableSearch, `[data-table-search="${tableSearch.dataset.tableSearch}"]`);
+    return;
+  }
+
+  const modalSearch = event.target.closest("[data-modal-search]");
+  if (modalSearch) {
+    applyModalSearch(modalSearch);
+  }
+});
+
+app.addEventListener("contextmenu", (event) => {
+  const contextSource = event.target.closest("[data-context-type]");
+  if (!contextSource || !app.contains(contextSource)) {
+    return;
+  }
+  event.preventDefault();
+  openContextMenu(
+    contextSource.dataset.contextType,
+    contextSource.dataset.contextId,
+    event.clientX,
+    event.clientY
+  );
+});
+
+app.addEventListener("change", async (event) => {
+  const studentFilter = event.target.closest("[data-student-filter]");
+  if (studentFilter) {
+    state.studentFilters[studentFilter.dataset.studentFilter] = studentFilter.value;
+    renderPreservingControl(studentFilter, `[data-student-filter="${studentFilter.dataset.studentFilter}"]`);
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") {
+    return;
+  }
+  if (state.contextMenu) {
+    closeContextMenu();
+    render();
+    return;
+  }
+  if (state.modal) {
+    state.modal = null;
+    render();
+  }
 });
 
 async function init() {

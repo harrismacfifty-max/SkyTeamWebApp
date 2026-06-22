@@ -67,7 +67,45 @@ public final class JdbcKursRepository implements KursRepository {
                 updateHours.setString(2, request.schuelerId());
                 updateHours.executeUpdate();
                 connection.commit();
-                return new Kurs(id, request.schuelerId(), request.thema(), request.dozent(), request.termin());
+                return new Kurs(id, request.schuelerId(), request.thema(), request.dozent(), request.termin(), request.dauerMinuten());
+            } catch (SQLException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (SQLException exception) {
+            throw JdbcSupport.failure(exception);
+        }
+    }
+
+    @Override
+    public boolean storniereTheorieKurs(String schuelerId, String kursId) {
+        String deleteSql = """
+                delete from KURSE
+                where ID_KURS = ? and ID_SCHUELER = ?
+                """;
+        String updateHoursSql = """
+                update SCHUELER
+                set THEORIESTUNDE = greatest(0, nvl(THEORIESTUNDE, 0) - 1)
+                where ID_SCHUELER = ?
+                """;
+        try (Connection connection = connections.open()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement delete = connection.prepareStatement(deleteSql);
+                 PreparedStatement updateHours = connection.prepareStatement(updateHoursSql)) {
+                delete.setString(1, kursId);
+                delete.setString(2, schuelerId);
+                boolean deleted = delete.executeUpdate() > 0;
+                if (!deleted) {
+                    connection.rollback();
+                    return false;
+                }
+
+                updateHours.setString(1, schuelerId);
+                updateHours.executeUpdate();
+                connection.commit();
+                return true;
             } catch (SQLException exception) {
                 connection.rollback();
                 throw exception;
@@ -110,4 +148,3 @@ public final class JdbcKursRepository implements KursRepository {
         );
     }
 }
-

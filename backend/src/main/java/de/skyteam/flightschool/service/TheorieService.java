@@ -2,6 +2,8 @@ package de.skyteam.flightschool.service;
 
 import de.skyteam.flightschool.dto.TheorieBuchungRequest;
 import de.skyteam.flightschool.dto.TheorieFortschrittDto;
+import de.skyteam.flightschool.dto.TheorieStornierungRequest;
+import de.skyteam.flightschool.dto.TheorieStornierungResponse;
 import de.skyteam.flightschool.error.BusinessConflictException;
 import de.skyteam.flightschool.error.NotFoundException;
 import de.skyteam.flightschool.error.ValidationException;
@@ -43,6 +45,26 @@ public final class TheorieService {
         validateRequest(request);
         requireSchueler(request.schuelerId());
         return kursRepository.createTheorieKurs(request);
+    }
+
+    public TheorieStornierungResponse storniereTheoriekurs(TheorieStornierungRequest request) {
+        if (request == null) {
+            throw new ValidationException("Theoriestornierung ist erforderlich.");
+        }
+        requireSchueler(request.schuelerId());
+        if (request.kursId() == null || request.kursId().isBlank()) {
+            throw new ValidationException("kursId ist erforderlich.");
+        }
+        boolean storniert = kursRepository.storniereTheorieKurs(request.schuelerId(), request.kursId());
+        if (!storniert) {
+            throw new NotFoundException("Theoriekurs wurde nicht gefunden.");
+        }
+        return new TheorieStornierungResponse(
+                request.schuelerId(),
+                request.kursId(),
+                true,
+                "Theoriekurs wurde storniert."
+        );
     }
 
     public boolean mindestanzahlErreicht(String schuelerId) {
@@ -92,4 +114,3 @@ public final class TheorieService {
         }
     }
 }
-

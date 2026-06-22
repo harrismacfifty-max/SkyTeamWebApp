@@ -22,6 +22,16 @@ public final class FlightSchoolApplication {
     }
 
     public static void main(String[] args) throws Exception {
+        try {
+            start();
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            System.err.println("SkyTeam Flight School API konnte nicht gestartet werden.");
+            System.err.println(exception.getMessage());
+            System.exit(1);
+        }
+    }
+
+    private static void start() throws Exception {
         int port = readPort();
         RepositoryProvider repositories = RepositoryProvider.fromEnvironment();
 
@@ -63,6 +73,9 @@ public final class FlightSchoolApplication {
 
         ApiHandler apiHandler = new ApiHandler(
                 ApplicationConfig.defaults(),
+                repositories.profile(),
+                repositories.databaseMode(),
+                repositories::databaseReachable,
                 new AuthService(),
                 studentService,
                 aircraftService,

@@ -148,14 +148,14 @@ EXTRA_CLASSPATH
 
 ## Demo-Modus
 
-Der Demo-Modus wird ueber `APP_PROFILE=dev` aktiviert oder automatisch genutzt, wenn kein Profil gesetzt ist.
+Der Demo-Modus wird ueber `APP_PROFILE=demo` aktiviert oder automatisch genutzt, wenn kein Profil gesetzt ist. `APP_PROFILE=dev` bleibt als lokaler Alias erhalten.
 
 Eigenschaften:
 
 - keine externe Datenbank
 - feste Demo-Daten fuer sieben BPMN-relevante Schuelerfaelle
 - Datei-Persistenz fuer manuelle Demo-Aenderungen
-- Persistenzdatei unter `backend/target/dev-data/flight-school-demo.properties`
+- lokale Persistenz unter `backend/target/dev-data/flight-school-demo.properties` oder im Docker-Volume `backend-demo-data`
 
 Die Demo-Implementierungen liegen unter:
 

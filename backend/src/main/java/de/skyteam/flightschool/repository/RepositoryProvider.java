@@ -29,6 +29,8 @@ import de.skyteam.flightschool.repository.memory.InMemoryWartungRepository;
 
 public record RepositoryProvider(
         String profile,
+        String databaseMode,
+        DatabaseHealthCheck databaseHealthCheck,
         StudentRepository students,
         AircraftRepository aircraft,
         LessonRepository lessons,
@@ -42,12 +44,19 @@ public record RepositoryProvider(
         WartungRepository wartungen,
         AusbildungsStatusRepository ausbildungsStatus
 ) {
+    @FunctionalInterface
+    public interface DatabaseHealthCheck {
+        boolean isReachable();
+    }
+
     public static RepositoryProvider fromEnvironment() {
         String profile = configuredProfile();
         if ("oracle".equalsIgnoreCase(profile)) {
             JdbcConnectionFactory connections = JdbcConnectionFactory.fromEnvironment();
             return new RepositoryProvider(
                     "oracle",
+                    "oracle",
+                    connections::isReachable,
                     new JdbcStudentRepository(connections),
                     new JdbcAircraftRepository(connections),
                     new JdbcLessonRepository(connections),
@@ -62,12 +71,14 @@ public record RepositoryProvider(
                     new JdbcAusbildungsStatusRepository(connections)
             );
         }
-        if (!"dev".equalsIgnoreCase(profile)) {
+        if (!"dev".equalsIgnoreCase(profile) && !"demo".equalsIgnoreCase(profile)) {
             throw new IllegalArgumentException("Unsupported APP_PROFILE: " + profile);
         }
         DevFlightSchoolData data = new DevFlightSchoolData();
         return new RepositoryProvider(
-                "dev",
+                "demo",
+                "demo",
+                () -> true,
                 new InMemoryStudentRepository(),
                 new InMemoryAircraftRepository(),
                 new InMemoryLessonRepository(),
@@ -89,9 +100,17 @@ public record RepositoryProvider(
             profile = System.getenv("APP_PROFILE");
         }
         if (profile == null || profile.isBlank()) {
-            return "dev";
+            return "demo";
         }
         return profile.trim();
+    }
+
+    public boolean databaseReachable() {
+        try {
+            return databaseHealthCheck.isReachable();
+        } catch (RuntimeException exception) {
+            return false;
+        }
     }
 }
 

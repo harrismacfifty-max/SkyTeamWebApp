@@ -293,7 +293,7 @@ public final class DevFlightSchoolData {
                 current.startzeit(),
                 current.endzeit(),
                 current.flugStunden(),
-                current.theorieStunden() + hours,
+                Math.max(0.0, current.theorieStunden() + hours),
                 current.notiz(),
                 current.name(),
                 current.vorname()
@@ -356,6 +356,7 @@ public final class DevFlightSchoolData {
             properties.setProperty(prefix + "typ", safe(value.typ()));
             properties.setProperty(prefix + "lehrer", safe(value.lehrer()));
             properties.setProperty(prefix + "tag", safe(value.tag()));
+            properties.setProperty(prefix + "dauerMinuten", String.valueOf(value.dauerMinuten()));
         });
 
         properties.setProperty("fluege.ids", joinIds(fluege));
@@ -482,7 +483,8 @@ public final class DevFlightSchoolData {
                     property(properties, prefix + "schuelerId", ""),
                     property(properties, prefix + "typ", ""),
                     property(properties, prefix + "lehrer", ""),
-                    property(properties, prefix + "tag", "")
+                    property(properties, prefix + "tag", ""),
+                    intProperty(properties, prefix + "dauerMinuten", 60)
             ));
         }
 
