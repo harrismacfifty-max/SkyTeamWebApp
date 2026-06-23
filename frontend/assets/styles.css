@@ -151,11 +151,34 @@ strong {
 
 .tabs {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 12px 28px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
+}
+
+.menu-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+.menu-group-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.menu-group-items {
+  display: flex;
+  gap: 8px;
 }
 
 .tab {
@@ -182,6 +205,10 @@ strong {
 .tab:focus-visible {
   outline: 3px solid rgba(122, 31, 61, 0.18);
   outline-offset: 2px;
+}
+
+.tab-action {
+  margin-left: auto;
 }
 
 .content {
@@ -321,6 +348,12 @@ textarea:focus {
 
 .empty-inline {
   margin: 14px 0 0;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .entity-picker,
@@ -475,10 +508,58 @@ textarea:focus {
   color: var(--muted);
 }
 
+.dashboard-actions-panel,
+.admin-bpmn-panel {
+  grid-column: 1 / -1;
+}
+
+.quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-bpmn-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-bpmn-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfdfe;
+}
+
+.admin-bpmn-step.done {
+  border-color: #c7ebda;
+  background: #f4fbf7;
+}
+
+.admin-bpmn-step.active {
+  border-color: #b8d8e5;
+  background: #f1f9fc;
+}
+
+.admin-bpmn-step.blocked {
+  border-color: #f7d6a5;
+  background: #fff9ed;
+}
+
+.admin-bpmn-step p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+
 .status-summary {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 14px;
 }
 
@@ -1010,6 +1091,7 @@ tr[data-context-type]:hover {
 
   .two-column,
   .process-lanes,
+  .admin-bpmn-list,
   .status-strip,
   .status-summary,
   .filter-grid {
@@ -1033,6 +1115,19 @@ tr[data-context-type]:hover {
   .app-header {
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  .menu-group {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .menu-group-items {
+    flex-wrap: wrap;
+  }
+
+  .tab-action {
+    margin-left: 0;
   }
 
   .dashboard-grid,

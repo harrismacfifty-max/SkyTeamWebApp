@@ -21,20 +21,47 @@
 Die SPA liegt in `frontend/assets/app.js` und wird ueber `frontend/index.php` oder `frontend/index.html` geladen. Sie nutzt keine Frameworks, sondern:
 
 - HTML-Templates in JavaScript
-- CSS fuer Layout, Tabs, Tabellen und BPMN-Schrittleisten
+- CSS fuer Layout, Tabs, Tabellen und BPMN-Lane-Schrittleisten
 - `fetch()` ueber `frontend/assets/api.js`
-- `localStorage` fuer Session-Token und ausgewaehlten Schueler
+- `localStorage` fuer Session-Token, Loginrolle und ausgewaehlten Schueler
 
-Die Navigation erfolgt ohne Seitenneuladung ueber Tabs:
+Die Navigation erfolgt ohne Seitenneuladung ueber eine zentrale rollenbasierte Menue-Definition in `app.js`.
 
 ```text
-Dashboard
-Schueler
-Theorie
-Praxis
-Pruefungen
-Abschluss
+SCHUELER:
+  Main Menu / Dashboard
+  Theorie anmelden
+  Praxis anmelden
+  Pruefung anmelden
+  Abschluss anfragen
+  Logout
+
+SCHUELERVERWALTUNG:
+  Main Menu / Dashboard
+  Selbstverwaltung
+    Uebersicht
+    Schueler anlegen
+    Schuelerdaten pruefen
+    Ausbildungsvertrag pruefen
+    Abschlussanfragen pruefen
+  Logout
 ```
+
+Rollenfremde Menuepunkte werden nicht gerendert. Backend-Endpunkte pruefen die Rolle zusaetzlich serverseitig und liefern bei falscher Rolle `403`.
+
+## BPMN- und Rollenlogik
+
+Die aktualisierte Datei `Ausbildungsverwaltung.bpmn` wird nicht direkt gerendert. Die WebApp bildet ihre fachlichen Lanes im Dashboard als Schrittleiste ab:
+
+```text
+Ausbilder              Anmeldung (Webapp)
+Schülerverwaltung      Schülerdaten prüfen, Vertrag prüfen, Schüler anlegen, Abbruch
+Prüfungsverwaltung     Abschlussanfrage prüfen, Abnahmekriterien prüfen, Abschluss bestätigen
+```
+
+Die WebApp kennt zwei Loginrollen: `SCHUELER` fuer den eigenen Ausbildungsprozess und `SCHUELERVERWALTUNG` fuer Verwaltungsfunktionen. `demo/demo` meldet als Schueler an, `demo2/demo2` als Schuelerverwaltung. Die BPMN-Lane `Pruefungsverwaltung` wird im MVP als fachlicher Bereich der Schuelerverwaltung umgesetzt.
+
+Schueler koennen eigene Theorie-, Praxis- und Pruefungsanmeldungen ausfuehren und eine Abschlussanfrage stellen. Die Schuelerverwaltung kann Schuelerdaten und Vertraege pruefen, Schueler anlegen und Abschlussanfragen bestaetigen oder ablehnen. Die Schuelerverwaltung kann keine Theorie-, Praxis- oder Pruefungsanmeldung als Schueleraktion ausfuehren.
 
 ## PHP-View-Layer
 
@@ -73,6 +100,7 @@ Fehler werden zentral ueber `ErrorHandler` strukturiert beantwortet:
 ```text
 400 Validierungsfehler
 401 Login fehlt
+403 falsche Rolle
 404 Entitaet nicht gefunden
 409 fachlicher Konflikt
 500 unerwarteter Fehler
@@ -89,6 +117,7 @@ PruefungsService
 AusbildungsstatusService
 SchuelerService
 AuthService
+AbschlussService
 ```
 
 Wichtige Regeln:
@@ -97,8 +126,8 @@ Wichtige Regeln:
 - Praxispruefung ab 10 Flugstunden.
 - Praxisbuchung prueft Fluglehrer, Flugzeug und Wartungsstatus.
 - Nicht bestandene Pruefungen erzeugen Wiederholungsbedarf.
-- Abschluss nur bei bestandener Theorie und Praxis.
-- Status `ABGESCHLOSSEN` wird erst nach Abschlussaktion gesetzt.
+- Abschluss nur bei vorhandener Abschlussanfrage und bestandener Theorie sowie Praxis.
+- Status `ABGESCHLOSSEN` wird erst nach Bestätigung durch die Schülerverwaltung gesetzt.
 
 ## Repository-Schicht
 

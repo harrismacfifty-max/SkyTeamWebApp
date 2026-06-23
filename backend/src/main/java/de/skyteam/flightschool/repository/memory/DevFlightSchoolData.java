@@ -1,6 +1,8 @@
 package de.skyteam.flightschool.repository.memory;
 
 import de.skyteam.flightschool.model.AusbildungsVertrag;
+import de.skyteam.flightschool.model.AbschlussAnfrage;
+import de.skyteam.flightschool.model.AbschlussAnfrageStatus;
 import de.skyteam.flightschool.model.Flug;
 import de.skyteam.flightschool.model.Flugzeug;
 import de.skyteam.flightschool.model.Kurs;
@@ -31,11 +33,13 @@ public final class DevFlightSchoolData {
     final Map<String, Flugzeug> flugzeuge = new LinkedHashMap<>();
     final Map<String, Wartung> wartungen = new LinkedHashMap<>();
     final Map<String, String> wartungFlugzeug = new LinkedHashMap<>();
+    final Map<String, AbschlussAnfrage> abschlussAnfragen = new LinkedHashMap<>();
     private int kursSeq = 950;
     private int flugSeq = 950;
     private int pruefungSeq = 950;
     private int schuelerSeq = 907;
     private int vertragSeq = 907;
+    private int abschlussAnfrageSeq = 906;
     private final Path persistenceFile;
 
     public DevFlightSchoolData() {
@@ -185,6 +189,7 @@ public final class DevFlightSchoolData {
         addFlug("FL912", "SC906", "FZ003", "2026-09-29T10:00", "2026-09-29T13:00", "EDVE", "EDDV", "Pruefungsvorbereitung");
         addPruefung("PRB904", "SC906", "2026-10-01T00:00", "Theoriepruefung Luftrecht - bestanden");
         addPruefung("PRB905", "SC906", "2026-10-03T00:00", "Praxispruefung Start und Landung - bestanden");
+        addAbschlussAnfrage("AA906", "SC906", AbschlussAnfrageStatus.ANGEFRAGT, "Demo-Anfrage fuer Abschlusspruefung", "2026-10-04T10:00", null);
 
         demoCase(
                 "SC907",
@@ -262,6 +267,24 @@ public final class DevFlightSchoolData {
         pruefungen.put(id, new Pruefung(id, schuelerId, LocalDateTime.parse(datum), typ));
     }
 
+    private void addAbschlussAnfrage(
+            String id,
+            String schuelerId,
+            AbschlussAnfrageStatus status,
+            String begruendung,
+            String angefragtAm,
+            String geprueftAm
+    ) {
+        abschlussAnfragen.put(id, new AbschlussAnfrage(
+                id,
+                schuelerId,
+                status,
+                begruendung,
+                angefragtAm == null ? null : LocalDateTime.parse(angefragtAm),
+                geprueftAm == null ? null : LocalDateTime.parse(geprueftAm)
+        ));
+    }
+
     synchronized String nextKursId() {
         return "KTB" + (++kursSeq);
     }
@@ -280,6 +303,10 @@ public final class DevFlightSchoolData {
 
     synchronized String nextAusbildungsVertragId() {
         return "AV" + (++vertragSeq);
+    }
+
+    synchronized String nextAbschlussAnfrageId() {
+        return "AA" + (++abschlussAnfrageSeq);
     }
 
     synchronized void addTheorieStunden(String schuelerId, double hours) {
@@ -325,6 +352,7 @@ public final class DevFlightSchoolData {
         properties.setProperty("seq.pruefung", String.valueOf(pruefungSeq));
         properties.setProperty("seq.schueler", String.valueOf(schuelerSeq));
         properties.setProperty("seq.vertrag", String.valueOf(vertragSeq));
+        properties.setProperty("seq.abschlussAnfrage", String.valueOf(abschlussAnfrageSeq));
 
         properties.setProperty("schueler.ids", joinIds(schueler));
         schueler.forEach((id, value) -> {
@@ -411,6 +439,16 @@ public final class DevFlightSchoolData {
             properties.setProperty(prefix + "flugzeugId", safe(value.flugzeugId()));
         });
 
+        properties.setProperty("abschlussAnfragen.ids", joinIds(abschlussAnfragen));
+        abschlussAnfragen.forEach((id, value) -> {
+            String prefix = "abschlussAnfrage." + id + ".";
+            properties.setProperty(prefix + "schuelerId", safe(value.schuelerId()));
+            properties.setProperty(prefix + "status", value.status().name());
+            properties.setProperty(prefix + "begruendung", safe(value.begruendung()));
+            properties.setProperty(prefix + "angefragtAm", text(value.angefragtAm()));
+            properties.setProperty(prefix + "geprueftAm", text(value.geprueftAm()));
+        });
+
         try {
             Files.createDirectories(persistenceFile.getParent());
             try (OutputStream output = Files.newOutputStream(persistenceFile)) {
@@ -442,12 +480,15 @@ public final class DevFlightSchoolData {
         flugzeuge.clear();
         wartungen.clear();
         wartungFlugzeug.clear();
+        abschlussAnfragen.clear();
 
         kursSeq = intProperty(properties, "seq.kurs", 950);
         flugSeq = intProperty(properties, "seq.flug", 950);
         pruefungSeq = intProperty(properties, "seq.pruefung", 950);
         schuelerSeq = intProperty(properties, "seq.schueler", 907);
         vertragSeq = intProperty(properties, "seq.vertrag", 907);
+        boolean hadAbschlussAnfragen = properties.containsKey("abschlussAnfragen.ids");
+        abschlussAnfrageSeq = intProperty(properties, "seq.abschlussAnfrage", 906);
 
         for (String id : ids(properties, "vertraege.ids")) {
             String prefix = "vertrag." + id + ".";
@@ -551,6 +592,24 @@ public final class DevFlightSchoolData {
             );
             wartungen.put(id, wartung);
             wartungFlugzeug.put(id, wartung.flugzeugId());
+        }
+
+        for (String id : ids(properties, "abschlussAnfragen.ids")) {
+            String prefix = "abschlussAnfrage." + id + ".";
+            abschlussAnfragen.put(id, new AbschlussAnfrage(
+                    id,
+                    property(properties, prefix + "schuelerId", ""),
+                    AbschlussAnfrageStatus.valueOf(property(properties, prefix + "status", "ANGEFRAGT")),
+                    property(properties, prefix + "begruendung", ""),
+                    dateTime(properties, prefix + "angefragtAm"),
+                    dateTime(properties, prefix + "geprueftAm")
+            ));
+        }
+
+        if (!hadAbschlussAnfragen && schueler.containsKey("SC906")) {
+            addAbschlussAnfrage("AA906", "SC906", AbschlussAnfrageStatus.ANGEFRAGT, "Demo-Anfrage fuer Abschlusspruefung", "2026-10-04T10:00", null);
+            abschlussAnfrageSeq = Math.max(abschlussAnfrageSeq, 906);
+            persist();
         }
     }
 

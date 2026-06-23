@@ -2,7 +2,7 @@
 
 ## Kurzbeschreibung
 
-SkyTeam Flight School ist eine browserbasierte Single-Page-Application zur Verwaltung eines vereinfachten Flugschulprozesses. Der MVP bildet Schuelerauswahl, Theorieausbildung, Praxisausbildung, Pruefungen, Abschluss und eine BPMN-nahe Prozessanzeige ab.
+SkyTeam Flight School ist eine browserbasierte Single-Page-Application zur Verwaltung eines vereinfachten Flugschulprozesses. Der MVP bildet die Rollen `Schüler` und `Schülerverwaltung`, Theorie-/Praxisanmeldungen, Prüfungsanmeldungen, Abschlussanfragen und eine BPMN-nahe Prozessanzeige nach den Lanes `Ausbilder`, `Schülerverwaltung` und `Prüfungsverwaltung` ab.
 
 Die Anwendung kann ohne Oracle-Datenbank im Demo-Modus vorgefuehrt werden. Manuelle Demo-Aenderungen wie neue Schueler oder gebuchte/stornierte Theorie- und Praxisstunden werden im Docker-Compose-Start in einem lokalen Docker-Volume gespeichert.
 
@@ -169,11 +169,58 @@ Das WebApp-Logo liegt unter `./frontend/assets/logo.png` und wird oben links im 
 ## Demo-Login
 
 ```text
+Schüler:
 username: demo
 password: demo
+role: SCHUELER
+
+Schülerverwaltung:
+username: demo2
+password: demo2
+role: SCHUELERVERWALTUNG
 ```
 
-Das Login ist bewusst einfach gehalten. Es gibt keine Rollenpruefung und keine externe Authentifizierung.
+Das Login ist bewusst einfach gehalten. Es gibt keine externe Authentifizierung und kein JWT. Rollen werden serverseitig ueber die InMemory-Session geprueft.
+
+## Rollen und Menüs
+
+Schüler (`demo/demo`) sieht nur Funktionen für den eigenen Ausbildungsprozess:
+
+- Main Menu / Dashboard
+- Theorie anmelden
+- Praxis anmelden
+- Prüfung anmelden
+- Abschluss anfragen
+- Logout
+
+Schüler dürfen eigene Theorieeinheiten, Praxiseinheiten und Prüfungen anmelden. Sie können eine Abschlussanfrage stellen und deren Status sehen. Sie können keine Schüler anlegen, keine Schülerdaten anderer Personen verwalten und keinen Abschluss selbst bestätigen.
+
+Schülerverwaltung (`demo2/demo2`) sieht nur Verwaltungsfunktionen:
+
+- Main Menu / Dashboard
+- Selbstverwaltung
+- Schüler anlegen
+- Schülerdaten prüfen
+- Ausbildungsvertrag prüfen
+- Abschlussanfragen prüfen/bestätigen
+- Logout
+
+Die Schülerverwaltung kann keine Theorie-, Praxis- oder Prüfungsanmeldung als Schüleraktion ausführen. Eine Abschlussanfrage wird durch den Schüler gestellt und wird erst nach Prüfung und Bestätigung durch die Schülerverwaltung wirksam.
+
+## BPMN-Bezug
+
+Die aktuelle BPMN-Version `Ausbildungsverwaltung.bpmn` wird im Dashboard als einfache Prozessanzeige abgebildet. Relevante BPMN-Punkte:
+
+- Anmeldung (Webapp)
+- Schülerdaten prüfen
+- Ausbildungsvertrag prüfen
+- Schüler anlegen
+- Beantragung des Schülers vorhanden?
+- Abnahmekriterien Theorie überprüfen
+- Abnahmekriterien Praxis überprüfen
+- Schüler Abschluss bestätigen
+
+Details stehen in [docs/bpmn-mapping.md](docs/bpmn-mapping.md).
 
 ## Demo-Modus
 
@@ -204,6 +251,12 @@ POST   /api/schueler
 GET    /api/schueler/{id}
 DELETE /api/schueler/{id}
 
+GET    /api/verwaltung/schueler
+GET    /api/verwaltung/schueler/{id}
+POST   /api/verwaltung/schueler
+GET    /api/verwaltung/schueler/{id}/vertrag
+POST   /api/verwaltung/schueler/{id}/vertrag/pruefen
+
 GET    /api/status/{schuelerId}/gesamt
 GET    /api/theorie/{schuelerId}
 POST   /api/theorie/buchen
@@ -216,7 +269,14 @@ GET    /api/pruefung/{schuelerId}
 POST   /api/pruefung/theorie/anmelden
 POST   /api/pruefung/praxis/anmelden
 POST   /api/pruefung/ergebnis
-POST   /api/ausbildung/{schuelerId}/abschliessen
+
+GET    /api/abschluss/meine-anfrage
+POST   /api/abschluss/anfragen
+GET    /api/verwaltung/abschlussanfragen
+GET    /api/verwaltung/abschlussanfragen/alle
+GET    /api/verwaltung/abschlussanfragen/{id}
+POST   /api/verwaltung/abschlussanfragen/{id}/bestaetigen
+POST   /api/verwaltung/abschlussanfragen/{id}/ablehnen
 ```
 
 Alle Antworten nutzen das einheitliche `ApiResponse`-Format:
@@ -254,7 +314,7 @@ chmod +x scripts/check-encoding.sh
 
 ## Bekannte Einschraenkungen
 
-- MVP-Login mit Demo-Benutzer, keine Rollen, kein JWT, keine externe Authentifizierung.
+- MVP-Login mit zwei Demo-Benutzern, einfache Rollenpruefung, kein JWT, keine externe Authentifizierung.
 - Keine E-Mail, keine Zahlung, keine externen Systeme.
 - Demo-Modus ist dateibasiert und nicht fuer parallele Mehrbenutzer-Szenarien gedacht.
 - Oracle-Modus ist vorbereitet, benoetigt aber einen passenden Oracle JDBC-Treiber und ein zur SQL-Struktur passendes Schema.

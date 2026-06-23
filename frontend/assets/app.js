@@ -3,19 +3,38 @@ const apiBase = document.body.dataset.apiBase || "http://localhost:8080/api";
 
 const STORAGE = {
   token: "skyteam.token",
+  username: "skyteam.username",
   displayName: "skyteam.displayName",
+  role: "skyteam.role",
+  schuelerId: "skyteam.schuelerId",
   selectedStudentId: "skyteam.selectedStudentId"
 };
 
-const TABS = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "students", label: "Schüler" },
-  { id: "theory", label: "Theorie" },
-  { id: "practice", label: "Praxis" },
-  { id: "exams", label: "Prüfungen" },
-  { id: "planning", label: "Planung" },
-  { id: "completion", label: "Abschluss" }
-];
+const roleMenus = {
+  SCHUELER: [
+    { id: "dashboard", label: "Main Menu / Dashboard" },
+    { id: "theory", label: "Theorie anmelden" },
+    { id: "practice", label: "Praxis anmelden" },
+    { id: "exams", label: "Prüfung anmelden" },
+    { id: "completion", label: "Abschluss anfragen" },
+    { id: "logout", label: "Logout", action: "logout" }
+  ],
+  SCHUELERVERWALTUNG: [
+    { id: "dashboard", label: "Main Menu / Dashboard" },
+    {
+      id: "self-management",
+      label: "Selbstverwaltung",
+      children: [
+        { id: "management", label: "Übersicht" },
+        { id: "student-create", label: "Schüler anlegen" },
+        { id: "student-review", label: "Schülerdaten prüfen" },
+        { id: "contract-review", label: "Ausbildungsvertrag prüfen" },
+        { id: "completion", label: "Abschlussanfragen prüfen" }
+      ]
+    },
+    { id: "logout", label: "Logout", action: "logout" }
+  ]
+};
 
 const STATUS_LABELS = {
   NICHT_GESTARTET: "Nicht gestartet",
@@ -25,6 +44,15 @@ const STATUS_LABELS = {
   PRUEFUNGEN_OFFEN: "Prüfungen offen",
   ABGESCHLOSSEN: "Abgeschlossen",
   ABGEBROCHEN: "Abgebrochen"
+};
+
+const ABSCHLUSS_STATUS_LABELS = {
+  KEINE_ANFRAGE: "Keine Anfrage",
+  ANGEFRAGT: "Angefragt",
+  IN_PRUEFUNG: "In Prüfung",
+  ABGELEHNT: "Abgelehnt",
+  BESTAETIGT: "Bestätigt",
+  ABGESCHLOSSEN: "Abgeschlossen"
 };
 
 const FIELD_LABELS = {
@@ -74,7 +102,10 @@ const PLANNING_COLUMNS = [
 
 const state = {
   token: localStorage.getItem(STORAGE.token) || "",
+  username: localStorage.getItem(STORAGE.username) || "",
   displayName: localStorage.getItem(STORAGE.displayName) || "",
+  role: localStorage.getItem(STORAGE.role) || "",
+  schuelerId: localStorage.getItem(STORAGE.schuelerId) || "",
   selectedStudentId: localStorage.getItem(STORAGE.selectedStudentId) || "",
   view: "dashboard",
   loading: false,
@@ -103,6 +134,10 @@ const state = {
   contextMenu: null,
   planningDrag: null,
   selectedStudent: null,
+  selectedVertrag: null,
+  abschlussAnfrage: null,
+  abschlussAnfragen: [],
+  abschlussAnfragenAlle: [],
   status: null,
   theorie: null,
   praxis: null,
@@ -179,6 +214,10 @@ function statusLabel(code) {
   return STATUS_LABELS[code] || code || "Unbekannt";
 }
 
+function abschlussStatusLabel(code) {
+  return ABSCHLUSS_STATUS_LABELS[code] || code || "Keine Anfrage";
+}
+
 function yesNo(value) {
   return value ? "Ja" : "Nein";
 }
@@ -218,6 +257,57 @@ function examStatus(exam) {
   return { label: "Angemeldet", tone: "info" };
 }
 
+function isStudentRole() {
+  return state.role === "SCHUELER";
+}
+
+function isManagementRole() {
+  return state.role === "SCHUELERVERWALTUNG";
+}
+
+function roleLabel(role = state.role) {
+  if (role === "SCHUELER") {
+    return "Schüler";
+  }
+  if (role === "SCHUELERVERWALTUNG") {
+    return "Schülerverwaltung";
+  }
+  return "Unbekannte Rolle";
+}
+
+function canUseStudentActions() {
+  return isStudentRole();
+}
+
+function canUseManagementActions() {
+  return isManagementRole();
+}
+
+function currentRoleMenu() {
+  return roleMenus[state.role] || [];
+}
+
+function flattenMenuItems(items = currentRoleMenu()) {
+  return items.flatMap((item) => item.children ? item.children : [item]);
+}
+
+function isViewAllowed(view) {
+  if (!view) {
+    return false;
+  }
+  return flattenMenuItems().some((item) => item.id === view && !item.action);
+}
+
+function navigateToView(view) {
+  if (!isViewAllowed(view)) {
+    state.view = "dashboard";
+    setMessage("error", "Keine Berechtigung für diese Funktion.");
+    return;
+  }
+  state.view = view;
+  setMessage("notice", "");
+}
+
 function theoryWorkflowStatus(status = {}) {
   if (status.theorieBestanden) {
     return { label: "Bestanden", tone: "success", detail: "Theorieprüfung bestanden." };
@@ -226,7 +316,7 @@ function theoryWorkflowStatus(status = {}) {
     return { label: "Bereit", tone: "info", detail: "Mindeststunden erreicht, Prüfung kann angemeldet werden." };
   }
   if (Number(status.theorieStunden || 0) > 0) {
-    return { label: "Offen", tone: "warning", detail: "Theorieausbildung läuft, Mindeststunden fehlen noch." };
+    return { label: "Offen", tone: "warning", detail: "Theorie läuft, Abnahmekriterien fehlen noch." };
   }
   return { label: "Offen", tone: "neutral", detail: "Noch keine Theoriestunden erfasst." };
 }
@@ -239,7 +329,7 @@ function practiceWorkflowStatus(status = {}) {
     return { label: "Bereit", tone: "info", detail: "Mindestflugstunden erreicht, Prüfung kann angemeldet werden." };
   }
   if (Number(status.flugStunden || 0) > 0) {
-    return { label: "Offen", tone: "warning", detail: "Praxisausbildung läuft, Mindestflugstunden fehlen noch." };
+    return { label: "Offen", tone: "warning", detail: "Praxis läuft, Abnahmekriterien fehlen noch." };
   }
   return { label: "Offen", tone: "neutral", detail: "Noch keine Flugstunden erfasst." };
 }
@@ -268,6 +358,43 @@ function trainingWorkflowStatus(status = {}) {
     return { label: "Nicht gestartet", tone: "neutral", detail: "Ausbildung wurde noch nicht begonnen." };
   }
   return { label: statusLabel(status.status || "AKTIV"), tone: "info", detail: "Ausbildung ist aktiv." };
+}
+
+function abschlussRequestForStudent(studentId = state.selectedStudentId) {
+  if (!studentId) {
+    return null;
+  }
+  if (state.abschlussAnfrage?.schuelerId === studentId) {
+    return state.abschlussAnfrage;
+  }
+  return state.abschlussAnfragen.find((request) => request.schuelerId === studentId)
+    || state.abschlussAnfragenAlle.find((request) => request.schuelerId === studentId)
+    || null;
+}
+
+function abschlussRequestIsActive(request) {
+  return ["ANGEFRAGT", "IN_PRUEFUNG", "BESTAETIGT", "ABGESCHLOSSEN"].includes(request?.status);
+}
+
+function abschlussWorkflowStatus(status = {}) {
+  const request = abschlussRequestForStudent(status.schuelerId || state.selectedStudentId);
+  const code = request?.status || "KEINE_ANFRAGE";
+  if (status.status === "ABGESCHLOSSEN" || code === "ABGESCHLOSSEN") {
+    return { label: "Abgeschlossen", tone: "success", detail: "Abschluss wurde bestätigt." };
+  }
+  if (code === "BESTAETIGT") {
+    return { label: "Bestätigt", tone: "success", detail: "Abschluss wurde bestätigt." };
+  }
+  if (code === "ABGELEHNT") {
+    return { label: "Abgelehnt", tone: "warning", detail: request?.begruendung || "Abschlussanfrage wurde abgelehnt." };
+  }
+  if (code === "IN_PRUEFUNG") {
+    return { label: "In Prüfung", tone: "info", detail: "Schülerverwaltung prüft die Abnahmekriterien." };
+  }
+  if (code === "ANGEFRAGT") {
+    return { label: "Angefragt", tone: "info", detail: "Abschlussanfrage liegt der Schülerverwaltung vor." };
+  }
+  return { label: "Keine Anfrage", tone: "neutral", detail: "Noch keine Abschlussanfrage gestellt." };
 }
 
 function isFailedExam(exam) {
@@ -387,10 +514,6 @@ function processTone(stateName) {
 function buildProcessAreas(status = {}) {
   const hasStatus = Boolean(status.schuelerId);
   const hasContract = Boolean(status.vertragsStatus);
-  const theoryHours = Number(status.theorieStunden || 0);
-  const flightHours = Number(status.flugStunden || 0);
-  const hasTheoryStarted = theoryHours > 0;
-  const hasPracticeStarted = flightHours > 0;
   const theoryReady = Boolean(status.theoriePruefungFreigeschaltet);
   const practiceReady = Boolean(status.praxisPruefungFreigeschaltet);
   const theoryPassed = Boolean(status.theorieBestanden);
@@ -398,28 +521,34 @@ function buildProcessAreas(status = {}) {
   const bothPassed = theoryPassed && practicePassed;
   const complete = isCompleted(status);
   const aborted = isAborted(status);
-
-  const theoryOpen = hasStatus && !theoryPassed && hasTheoryStarted && !theoryReady;
-  const theoryExamOpen = theoryReady && !theoryPassed;
-  const theoryRepeat = theoryReady && !theoryPassed;
-  const practiceOpen = hasStatus && !practicePassed && hasPracticeStarted && !practiceReady;
-  const practiceExamOpen = practiceReady && !practicePassed;
-  const practiceRepeat = practiceReady && !practicePassed;
+  const loggedIn = Boolean(state.token);
+  const studentCreated = hasStatus && hasContract && !aborted;
+  const completionRequest = abschlussRequestForStudent(status.schuelerId);
+  const completionRequestStatus = completionRequest?.status || "KEINE_ANFRAGE";
+  const completionRequestAvailable = abschlussRequestIsActive(completionRequest) || complete;
+  const completionRequestRejected = completionRequestStatus === "ABGELEHNT";
+  const noCompletionRequest = hasStatus && !completionRequestAvailable && !aborted;
 
   return [
     {
-      title: "Ausbildungsverwaltung",
-      summary: "Vom Ausbildungsstart bis zur Abschlussdokumentation.",
+      title: "Ausbilder",
+      summary: "Startet den Prozess über die Anmeldung in der WebApp.",
       steps: [
         {
-          label: "Ausbildungsanfrage / Ausbildung starten",
-          detail: hasStatus ? `Schüler ${status.schuelerId}` : "Kein Schülerstatus geladen",
-          state: processStepState({ done: hasStatus, active: !hasStatus }, status)
-        },
+          label: "Anmeldung (Webapp)",
+          detail: loggedIn ? "Demo-Benutzer ist angemeldet" : "Login erforderlich",
+          state: processStepState({ done: loggedIn, active: !loggedIn }, status)
+        }
+      ]
+    },
+    {
+      title: "Schülerverwaltung",
+      summary: "Prüft Schülerdaten und Vertrag, legt Schüler an oder bricht ab.",
+      steps: [
         {
           label: "Schülerdaten prüfen",
-          detail: hasStatus ? "Schülerakte vorhanden" : "Schülerauswahl fehlt",
-          state: processStepState({ done: hasStatus }, status)
+          detail: hasStatus ? `Schülerakte ${status.schuelerId} vorhanden` : "Schülerauswahl oder Neuanlage erforderlich",
+          state: processStepState({ done: hasStatus && !aborted, active: !hasStatus }, status)
         },
         {
           label: "Ausbildungsvertrag prüfen",
@@ -427,118 +556,55 @@ function buildProcessAreas(status = {}) {
           state: processStepState({ done: hasContract && !aborted, active: hasStatus && !hasContract }, status)
         },
         {
-          label: "Ausbildungsplan anlegen",
-          detail: hasTheoryStarted || hasPracticeStarted ? "Theorie/Praxis im Plan sichtbar" : "Noch keine Ausbildungsstunden",
-          state: processStepState({
-            done: hasTheoryStarted || hasPracticeStarted,
-            active: hasStatus && hasContract && !hasTheoryStarted && !hasPracticeStarted
-          }, status)
+          label: "Schüler anlegen",
+          detail: studentCreated ? "Schüler ist im Demo-/Oracle-Modell angelegt" : "Anlage über Schülerverwaltung möglich",
+          state: processStepState({ done: studentCreated, active: !hasStatus }, status)
         },
         {
-          label: "Ausbildungsabschluss dokumentieren",
-          detail: complete ? "Abschluss dokumentiert" : bothPassed ? "Bereit zur Dokumentation" : "Theorie und Praxis müssen bestanden sein",
-          state: processStepState({
-            done: complete,
-            active: bothPassed && !complete,
-            blocked: hasStatus && !bothPassed && !aborted
-          }, status)
+          label: "Abbruch",
+          detail: aborted ? "Ausbildung wurde abgebrochen" : "Nur bei ungültigen Daten oder Vertrag relevant",
+          state: aborted ? "done" : "open"
+        },
+        {
+          label: "Schüler erfolgreich angelegt",
+          detail: studentCreated ? "Schülerverwaltung abgeschlossen" : "Wartet auf erfolgreiche Anlage",
+          state: processStepState({ done: studentCreated, active: hasStatus && !hasContract }, status)
         }
       ]
     },
     {
-      title: "Theorieausbildung",
-      summary: "Buchung, Stundenfortschritt, Prüfung und Wiederholung.",
+      title: "Prüfungsverwaltung",
+      summary: "Prüft Abschlussanfrage und Abnahmekriterien, bestätigt den Abschluss.",
       steps: [
         {
-          label: "Theoriekurs buchen",
-          detail: hasTheoryStarted ? "Theoriedaten vorhanden" : "Nächster Schritt: Kurs buchen",
-          state: processStepState({ done: hasTheoryStarted, active: hasStatus && !hasTheoryStarted }, status)
+          label: "Beantragung des Schülers vorhanden?",
+          detail: completionRequestAvailable ? `Abschlussanfrage: ${abschlussStatusLabel(completionRequestStatus)}` : "Noch keine Abschlussanfrage",
+          state: processStepState({ done: completionRequestAvailable, active: noCompletionRequest }, status)
         },
         {
-          label: "Theoriekurs durchführen",
-          detail: hasTheoryStarted ? "Kursdurchführung im MVP über Buchung abgebildet" : "Wartet auf Buchung",
-          state: processStepState({ done: hasTheoryStarted, active: hasStatus && !hasTheoryStarted }, status)
+          label: "Nein",
+          detail: completionRequestRejected ? "Abschlussanfrage wurde abgelehnt" : noCompletionRequest ? "Abschlussanfrage fehlt oder Abnahmekriterien fehlen" : "Nein-Pfad nicht aktiv",
+          state: completionRequestRejected || noCompletionRequest ? "blocked" : "open"
         },
         {
-          label: "Theoriestunden erfassen",
-          detail: `${formatHours(theoryHours)} h erfasst`,
-          state: processStepState({ done: hasTheoryStarted, active: hasStatus && !hasTheoryStarted }, status)
+          label: "Abnahmekriterien Theorie überprüfen",
+          detail: theoryPassed ? "Theorieprüfung bestanden" : theoryReady ? "Theorie freigeschaltet, Ergebnis offen" : "Theorie-Abnahmekriterien fehlen",
+          state: processStepState({ done: theoryPassed, active: theoryReady && !theoryPassed, blocked: hasStatus && !theoryReady && !theoryPassed }, status)
         },
         {
-          label: "Restliche Theoriestunden prüfen",
-          detail: theoryReady ? "Mindeststunden erreicht" : `${formatHours(10 - Math.min(theoryHours, 10))} h fehlen`,
-          state: processStepState({ done: theoryReady, active: theoryOpen }, status)
+          label: "Abnahmekriterien Praxis überprüfen",
+          detail: practicePassed ? "Praxisprüfung bestanden" : practiceReady ? "Praxis freigeschaltet, Ergebnis offen" : "Praxis-Abnahmekriterien fehlen",
+          state: processStepState({ done: practicePassed, active: practiceReady && !practicePassed, blocked: hasStatus && !practiceReady && !practicePassed }, status)
         },
         {
-          label: "Theorieprüfung durchführen",
-          detail: theoryPassed ? "Bestanden" : theoryReady ? "Freigeschaltet" : "Mindeststunden fehlen",
-          state: processStepState({ done: theoryPassed, active: theoryExamOpen, blocked: hasStatus && !theoryReady && !theoryPassed }, status)
+          label: "Schüler Abschluss bestätigen",
+          detail: complete ? "Abschluss bestätigt" : bothPassed && completionRequestAvailable ? "Abschluss bestätigen im Tab Abschluss" : "Abschlussanfrage und Abnahmekriterien müssen erfüllt sein",
+          state: processStepState({ done: complete, active: bothPassed && completionRequestAvailable && !complete, blocked: hasStatus && (!bothPassed || !completionRequestAvailable) }, status)
         },
         {
-          label: "Theorieergebnis speichern",
-          detail: theoryPassed ? "Ergebnis gespeichert" : "Noch kein bestandenes Ergebnis",
-          state: processStepState({ done: theoryPassed, active: theoryExamOpen, blocked: hasStatus && !theoryReady && !theoryPassed }, status)
-        },
-        {
-          label: "Theorie wiederholen oder abschließen",
-          detail: theoryPassed ? "Theoriezweig abgeschlossen" : theoryRepeat ? "Wiederholung möglich, falls nicht bestanden" : "Prüfung noch nicht erreichbar",
-          state: processStepState({ done: theoryPassed, active: theoryRepeat, blocked: hasStatus && !theoryReady && !theoryPassed }, status)
-        }
-      ]
-    },
-    {
-      title: "Praxisausbildung",
-      summary: "Buchung, Verfügbarkeitschecks, Flug, Stunden und Praxisprüfung.",
-      steps: [
-        {
-          label: "Neue Flugstunde buchen",
-          detail: hasPracticeStarted ? "Flugstunden vorhanden" : "Nächster Schritt: Flugstunde buchen",
-          state: processStepState({ done: hasPracticeStarted, active: hasStatus && !hasPracticeStarted }, status)
-        },
-        {
-          label: "Fluglehrer prüfen",
-          detail: hasPracticeStarted ? "Über Praxisbuchung geprüft" : "Blockiert Buchung bei fehlender Verfügbarkeit",
-          state: processStepState({ done: hasPracticeStarted, active: hasStatus && !hasPracticeStarted }, status)
-        },
-        {
-          label: "Flugzeug prüfen",
-          detail: hasPracticeStarted ? "Über Praxisbuchung geprüft" : "Blockiert Buchung bei fehlender Verfügbarkeit",
-          state: processStepState({ done: hasPracticeStarted, active: hasStatus && !hasPracticeStarted }, status)
-        },
-        {
-          label: "Wartungsstatus prüfen",
-          detail: hasPracticeStarted ? "Wartungsregel in Buchung angewendet" : "Wartungsrelevante Flugzeuge werden abgelehnt",
-          state: processStepState({ done: hasPracticeStarted, active: hasStatus && !hasPracticeStarted }, status)
-        },
-        {
-          label: "Check-in durchführen",
-          detail: hasPracticeStarted ? "Im MVP als Teil der Flugstunde sichtbar" : "Wartet auf Flugstunde",
-          state: processStepState({ done: hasPracticeStarted, active: hasStatus && !hasPracticeStarted }, status)
-        },
-        {
-          label: "Ausbildungsflug durchführen",
-          detail: hasPracticeStarted ? "Ausbildungsflug erfasst" : "Noch kein Ausbildungsflug",
-          state: processStepState({ done: hasPracticeStarted, active: hasStatus && !hasPracticeStarted }, status)
-        },
-        {
-          label: "Flugstunden erfassen",
-          detail: `${formatHours(flightHours)} h erfasst`,
-          state: processStepState({ done: hasPracticeStarted, active: hasStatus && !hasPracticeStarted }, status)
-        },
-        {
-          label: "Praxisprüfung durchführen",
-          detail: practicePassed ? "Bestanden" : practiceReady ? "Freigeschaltet" : "Mindeststunden fehlen",
-          state: processStepState({ done: practicePassed, active: practiceExamOpen, blocked: hasStatus && !practiceReady && !practicePassed }, status)
-        },
-        {
-          label: "Praxisergebnis speichern",
-          detail: practicePassed ? "Ergebnis gespeichert" : "Noch kein bestandenes Ergebnis",
-          state: processStepState({ done: practicePassed, active: practiceExamOpen, blocked: hasStatus && !practiceReady && !practicePassed }, status)
-        },
-        {
-          label: "Praxis wiederholen oder abschließen",
-          detail: practicePassed ? "Praxiszweig abgeschlossen" : practiceRepeat ? "Wiederholung möglich, falls nicht bestanden" : "Prüfung noch nicht erreichbar",
-          state: processStepState({ done: practicePassed, active: practiceRepeat, blocked: hasStatus && !practiceReady && !practicePassed }, status)
+          label: "Bestätigt",
+          detail: complete ? "Ausbildung ist abgeschlossen" : "Wartet auf Abschlussbestätigung",
+          state: processStepState({ done: complete, active: bothPassed && completionRequestAvailable && !complete }, status)
         }
       ]
     }
@@ -601,7 +667,8 @@ function renderProcessOverview(status) {
         </div>
       </div>
       <p class="process-note">
-        Die Schrittzustände werden aus <code>GET /api/status/${escapeHtml(status?.schuelerId || "{schuelerId}")}/gesamt</code> abgeleitet.
+        Die Lanes entsprechen <code>Ausbildungsverwaltung.bpmn</code>. Schrittzustände werden aus
+        <code>GET /api/status/${escapeHtml(status?.schuelerId || "{schuelerId}")}/gesamt</code> abgeleitet.
       </p>
       <div class="process-lanes">
         ${areas.map(renderProcessArea).join("")}
@@ -674,7 +741,7 @@ function actionMessage() {
   if (state.view === "completion") {
     return "Ausbildungsstatus wird aktualisiert...";
   }
-  if (state.view === "students") {
+  if (["student-create", "student-review", "contract-review", "management"].includes(state.view)) {
     return "Schülerdaten werden aktualisiert...";
   }
   if (state.view === "planning") {
@@ -685,6 +752,10 @@ function actionMessage() {
 
 function resetSelectedData() {
   state.selectedStudent = null;
+  state.selectedVertrag = null;
+  state.abschlussAnfrage = null;
+  state.abschlussAnfragen = [];
+  state.abschlussAnfragenAlle = [];
   state.status = null;
   state.theorie = null;
   state.praxis = null;
@@ -696,9 +767,15 @@ function resetSelectedData() {
 
 function clearAuth(message = "") {
   localStorage.removeItem(STORAGE.token);
+  localStorage.removeItem(STORAGE.username);
   localStorage.removeItem(STORAGE.displayName);
+  localStorage.removeItem(STORAGE.role);
+  localStorage.removeItem(STORAGE.schuelerId);
   state.token = "";
+  state.username = "";
   state.displayName = "";
+  state.role = "";
+  state.schuelerId = "";
   state.loading = false;
   state.action = false;
   state.students = [];
@@ -726,7 +803,7 @@ async function api(path, options) {
 }
 
 async function loadStudents() {
-  state.students = await api("/schueler");
+  state.students = await api(isManagementRole() ? "/verwaltung/schueler" : "/schueler");
   const statuses = await Promise.all(state.students.map(async (student) => {
     try {
       return [student.id, await api(`/status/${encodeURIComponent(student.id)}/gesamt`)];
@@ -735,7 +812,9 @@ async function loadStudents() {
     }
   }));
   state.studentStatuses = Object.fromEntries(statuses.filter((entry) => entry[1]));
-  if (!state.students.some((student) => student.id === state.selectedStudentId)) {
+  if (isStudentRole() && state.schuelerId && state.students.some((student) => student.id === state.schuelerId)) {
+    state.selectedStudentId = state.schuelerId;
+  } else if (!state.students.some((student) => student.id === state.selectedStudentId)) {
     state.selectedStudentId = state.students[0]?.id || "";
   }
   if (state.selectedStudentId) {
@@ -753,18 +832,24 @@ async function loadSelectedStudentData() {
 
   const previousStudentId = state.selectedStudent?.id;
   const id = encodeURIComponent(state.selectedStudentId);
-  const [student, status, theorie, praxis, pruefungen] = await Promise.all([
-    api(`/schueler/${id}`),
+  const studentPath = isManagementRole() ? `/verwaltung/schueler/${id}` : `/schueler/${id}`;
+  const contractPromise = isManagementRole()
+    ? api(`/verwaltung/schueler/${id}/vertrag`).catch(() => null)
+    : Promise.resolve(null);
+  const [student, status, theorie, praxis, pruefungen, vertrag] = await Promise.all([
+    api(studentPath),
     api(`/status/${id}/gesamt`),
     api(`/theorie/${id}`),
     api(`/praxis/${id}`),
-    api(`/pruefung/${id}`)
+    api(`/pruefung/${id}`),
+    contractPromise
   ]);
 
   if (previousStudentId !== student.id) {
     state.repeatMarkers = {};
   }
   state.selectedStudent = student;
+  state.selectedVertrag = vertrag;
   state.status = status;
   state.studentStatuses[student.id] = status;
   state.theorie = theorie;
@@ -773,6 +858,30 @@ async function loadSelectedStudentData() {
   if (!pruefungen.some((exam) => exam.id === state.examResultSelection)) {
     state.examResultSelection = pruefungen[0]?.id || "";
   }
+}
+
+async function loadAbschlussData() {
+  if (isStudentRole()) {
+    state.abschlussAnfrage = await api("/abschluss/meine-anfrage").catch(() => null);
+    state.abschlussAnfragen = [];
+    state.abschlussAnfragenAlle = [];
+    return;
+  }
+
+  if (isManagementRole()) {
+    const [offeneAnfragen, alleAnfragen] = await Promise.all([
+      api("/verwaltung/abschlussanfragen").catch(() => []),
+      api("/verwaltung/abschlussanfragen/alle").catch(() => null)
+    ]);
+    state.abschlussAnfragen = offeneAnfragen;
+    state.abschlussAnfragenAlle = alleAnfragen || offeneAnfragen;
+    state.abschlussAnfrage = abschlussRequestForStudent();
+    return;
+  }
+
+  state.abschlussAnfrage = null;
+  state.abschlussAnfragen = [];
+  state.abschlussAnfragenAlle = [];
 }
 
 async function refreshAll({ keepNotice = false } = {}) {
@@ -785,6 +894,7 @@ async function refreshAll({ keepNotice = false } = {}) {
   try {
     await loadStudents();
     await loadSelectedStudentData();
+    await loadAbschlussData();
     state.error = "";
   } catch (error) {
     if (!handleApiError(error)) {
@@ -829,7 +939,8 @@ function renderLogin() {
       <section class="login-panel">
         <p class="eyebrow">SkyTeam Flight School</p>
         <h1>Anmelden</h1>
-        <p class="muted">Demo-Zugang: <strong>demo</strong> / <strong>demo</strong></p>
+        <p class="muted">Schüler: <strong>demo</strong> / <strong>demo</strong></p>
+        <p class="muted">Schülerverwaltung: <strong>demo2</strong> / <strong>demo2</strong></p>
         ${state.error ? `<p class="alert error">${escapeHtml(state.error)}</p>` : ""}
         <form id="loginForm" class="form-grid single">
           <label>
@@ -849,6 +960,39 @@ function renderLogin() {
   `;
 }
 
+function renderMenuButton(item) {
+  const isActive = state.view === item.id;
+  if (item.action === "logout") {
+    return `
+      <button class="tab tab-action" type="button" data-menu-action="logout">
+        ${escapeHtml(item.label)}
+      </button>
+    `;
+  }
+  return `
+    <button class="tab ${isActive ? "active" : ""}" type="button" data-tab="${escapeHtml(item.id)}">
+      ${escapeHtml(item.label)}
+    </button>
+  `;
+}
+
+function renderRoleMenu(items = currentRoleMenu()) {
+  return items.map((item) => {
+    if (!item.children) {
+      return renderMenuButton(item);
+    }
+    const active = item.children.some((child) => child.id === state.view);
+    return `
+      <div class="menu-group ${active ? "active" : ""}">
+        <span class="menu-group-label">${escapeHtml(item.label)}</span>
+        <div class="menu-group-items">
+          ${item.children.map(renderMenuButton).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
 function renderApplication() {
   app.innerHTML = `
     <div class="app-shell">
@@ -865,21 +1009,17 @@ function renderApplication() {
         </div>
         <div class="session">
           <span>${renderBadge(`Angemeldet: ${state.displayName || "demo"}`, "success")}</span>
+          <span>${renderBadge(roleLabel(), isManagementRole() ? "info" : "neutral")}</span>
           <button class="button secondary" id="refreshButton" type="button" ${state.loading || state.action ? "disabled" : ""}>Aktualisieren</button>
-          <button class="button ghost" id="logoutButton" type="button">Logout</button>
         </div>
       </header>
 
       <nav class="tabs" aria-label="Hauptnavigation">
-        ${TABS.map((tab) => `
-          <button class="tab ${state.view === tab.id ? "active" : ""}" type="button" data-tab="${tab.id}">
-            ${escapeHtml(tab.label)}
-          </button>
-        `).join("")}
+        ${renderRoleMenu()}
       </nav>
 
       <main class="content">
-        ${renderStudentContext()}
+        ${isManagementRole() && state.view === "dashboard" ? "" : renderStudentContext()}
         ${state.error ? `<p class="alert error">${escapeHtml(state.error)}</p>` : ""}
         ${state.notice ? `<p class="alert success">${escapeHtml(state.notice)}</p>` : ""}
         ${state.action ? `<p class="alert info"><span class="mini-spinner"></span>${escapeHtml(actionMessage())}</p>` : ""}
@@ -923,9 +1063,9 @@ function contextMenuItems(menu) {
     return [
       { action: "student-details", label: "Details anzeigen" },
       { action: "student-status", label: "Status anzeigen" },
-      { action: "student-theory", label: "Theorie öffnen" },
-      { action: "student-practice", label: "Praxis öffnen" },
-      { action: "student-exams", label: "Prüfungen öffnen" }
+      { action: "student-review", label: "Schülerdaten prüfen" },
+      { action: "student-contract", label: "Ausbildungsvertrag prüfen" },
+      { action: "student-completion", label: "Abschlussanfragen prüfen" }
     ];
   }
 
@@ -937,8 +1077,8 @@ function contextMenuItems(menu) {
     const unlocked = Boolean(state.theorie?.fortschritt?.theoriePruefungFreigeschaltet || state.status?.theoriePruefungFreigeschaltet);
     return [
       { action: "course-details", label: "Details anzeigen" },
-      { action: "course-theory-exam", label: "Prüfung anmelden", disabled: !unlocked || state.action, hint: "Mindeststunden fehlen" },
-      { action: "course-cancel", label: "Stornieren", disabled: state.action, hint: "Aktion läuft" }
+      { action: "course-theory-exam", label: "Prüfung anmelden", disabled: !canUseStudentActions() || !unlocked || state.action, hint: canUseStudentActions() ? "Mindeststunden fehlen" : "Nur Schüler dürfen Prüfungen anmelden" },
+      { action: "course-cancel", label: "Stornieren", disabled: !canUseStudentActions() || state.action, hint: canUseStudentActions() ? "Aktion läuft" : "Nur Schüler dürfen Buchungen ändern" }
     ];
   }
 
@@ -950,16 +1090,16 @@ function contextMenuItems(menu) {
     const unlocked = Boolean(state.praxis?.fortschritt?.praxisPruefungFreigeschaltet || state.status?.praxisPruefungFreigeschaltet);
     return [
       { action: "flight-details", label: "Details anzeigen" },
-      { action: "flight-practice-exam", label: "Praxisprüfung anmelden", disabled: !unlocked || state.action, hint: "Mindestflugstunden fehlen" },
-      { action: "flight-cancel", label: "Stornieren", disabled: state.action, hint: "Aktion läuft" }
+      { action: "flight-practice-exam", label: "Praxisprüfung anmelden", disabled: !canUseStudentActions() || !unlocked || state.action, hint: canUseStudentActions() ? "Mindestflugstunden fehlen" : "Nur Schüler dürfen Prüfungen anmelden" },
+      { action: "flight-cancel", label: "Stornieren", disabled: !canUseStudentActions() || state.action, hint: canUseStudentActions() ? "Aktion läuft" : "Nur Schüler dürfen Buchungen ändern" }
     ];
   }
 
   if (menu.type === "exam") {
     const exam = state.pruefungen.find((entry) => entry.id === menu.id);
     return [
-      { action: "exam-result", label: "Ergebnis speichern", disabled: state.action, hint: "Aktion läuft" },
-      { action: "exam-repeat", label: "Wiederholung markieren", disabled: !exam || !isFailedExam(exam), hint: "Nur bei nicht bestandener Prüfung" }
+      { action: "exam-result", label: "Ergebnis speichern", disabled: !canUseManagementActions() || state.action, hint: canUseManagementActions() ? "Aktion läuft" : "Nur Schülerverwaltung darf Ergebnisse speichern" },
+      { action: "exam-repeat", label: "Wiederholung markieren", disabled: !canUseManagementActions() || !exam || !isFailedExam(exam), hint: "Nur Schülerverwaltung und nur bei nicht bestandener Prüfung" }
     ];
   }
 
@@ -971,7 +1111,12 @@ function contextMenuItems(menu) {
     return [
       { action: "aircraft-details", label: "Details anzeigen" },
       { action: "aircraft-maintenance", label: "Wartungsstatus anzeigen" },
-      { action: "aircraft-select", label: "Für Buchung auswählen", disabled: !aircraft?.available || state.action, hint: "Flugzeug nicht verfügbar" }
+      {
+        action: "aircraft-select",
+        label: "Für Buchung auswählen",
+        disabled: !canUseStudentActions() || !aircraft?.available || state.action,
+        hint: canUseStudentActions() ? "Flugzeug nicht verfügbar" : "Nur Schüler dürfen Buchungen vorbereiten"
+      }
     ];
   }
 
@@ -982,10 +1127,11 @@ function renderStudentContext() {
   const student = selectedStudent();
   const status = student ? studentStatus(student.id) : {};
   const training = student ? trainingWorkflowStatus(status) : null;
+  const contextLabel = isStudentRole() ? "Dein Ausbildungsdatensatz" : "Ausgewählter Schüler";
   return `
     <section class="student-context">
       <div>
-        <p class="eyebrow">Ausgewählter Schüler</p>
+        <p class="eyebrow">${escapeHtml(contextLabel)}</p>
         <h2>${escapeHtml(studentFullName(student))}</h2>
         <div class="badge-row context-badges">
           ${student ? renderBadge(student.id, "neutral") : ""}
@@ -993,7 +1139,7 @@ function renderStudentContext() {
           ${student ? renderBadge(contractStatus(student), "neutral") : ""}
         </div>
       </div>
-      <button class="button secondary" type="button" data-tab="students">Schueler suchen</button>
+      ${isManagementRole() ? `<button class="button secondary" type="button" data-tab="student-review">Schülerdaten prüfen</button>` : ""}
     </section>
   `;
 }
@@ -1008,13 +1154,25 @@ function renderLoading() {
 }
 
 function renderCurrentView() {
-  if (!state.selectedStudentId && state.view !== "students") {
+  if (!isViewAllowed(state.view)) {
+    return renderForbiddenView();
+  }
+
+  const selectedStudentRequired = !["dashboard", "management", "student-create", "student-review"].includes(state.view)
+    && !(isManagementRole() && state.view === "completion");
+  if (!state.selectedStudentId && selectedStudentRequired) {
     return renderEmptyState("Bitte zuerst einen Schüler in der Schüleransicht auswählen.");
   }
 
   switch (state.view) {
-    case "students":
+    case "management":
+      return renderManagementHomeView();
+    case "student-create":
+      return renderStudentCreateView();
+    case "student-review":
       return renderStudentsView();
+    case "contract-review":
+      return renderContractReviewView();
     case "theory":
       return renderTheoryView();
     case "practice":
@@ -1028,6 +1186,16 @@ function renderCurrentView() {
     default:
       return renderDashboardView();
   }
+}
+
+function renderForbiddenView() {
+  return `
+    <section class="panel empty-state">
+      <h3>Keine Berechtigung</h3>
+      <p>Diese Funktion ist für die aktuelle Rolle nicht freigegeben.</p>
+      <button class="button primary" type="button" data-tab="dashboard">Zurück zum Main Menu</button>
+    </section>
+  `;
 }
 
 function renderEmptyState(message) {
@@ -1111,11 +1279,13 @@ function renderStatusSummary(status = {}) {
   const practice = practiceWorkflowStatus(status);
   const exams = examWorkflowStatus(status, state.pruefungen);
   const training = trainingWorkflowStatus(status);
+  const abschluss = abschlussWorkflowStatus(status);
   const items = [
     { title: "Theorie", info: theory },
     { title: "Praxis", info: practice },
     { title: "Prüfung", info: exams },
-    { title: "Ausbildung", info: training }
+    { title: "Ausbildung", info: training },
+    { title: "Abschluss", info: abschluss }
   ];
   return `
     <section class="panel status-summary" aria-label="Statusübersicht">
@@ -1131,6 +1301,10 @@ function renderStatusSummary(status = {}) {
 }
 
 function renderDashboardView() {
+  return isManagementRole() ? renderAdminDashboard() : renderStudentDashboard();
+}
+
+function renderStudentDashboard() {
   const student = selectedStudent();
   const status = state.status || {};
   const theorie = state.theorie?.fortschritt || {};
@@ -1140,13 +1314,15 @@ function renderDashboardView() {
   const practiceInfo = practiceWorkflowStatus(status);
   const examInfo = examWorkflowStatus(status, state.pruefungen);
   const trainingInfo = trainingWorkflowStatus(status);
+  const abschlussInfo = abschlussWorkflowStatus(status);
 
   return `
     <section class="dashboard-grid">
       <article class="panel hero-panel">
         <div>
-          <p class="eyebrow">Dashboard</p>
-          <h2>${escapeHtml(studentFullName(student))}</h2>
+          <p class="eyebrow">Schülerdashboard</p>
+          <h2>Hallo ${escapeHtml(studentFullName(student))}</h2>
+          <p class="muted">Hier verwaltest du deine eigene Theorie-, Praxis-, Prüfungs- und Abschlussanmeldung.</p>
           <p class="muted">Vertrag ${escapeHtml(student?.ausbildungsVertragId || "-")} · ${escapeHtml(status.vertragsStatus || "Status unbekannt")}</p>
         </div>
         ${renderBadge(trainingInfo.label, trainingInfo.tone)}
@@ -1186,13 +1362,163 @@ function renderDashboardView() {
 
       <article class="metric-card">
         <span>Abschlussstatus</span>
-        <strong>${canComplete ? "Möglich" : "Offen"}</strong>
-        <p>${canComplete ? "Theorie und Praxis sind bestanden." : "Abschluss erst nach bestandener Theorie- und Praxisprüfung."}</p>
-        ${renderBooleanBadge(canComplete, "Abschluss bereit", "Noch nicht bereit")}
+        <strong>${escapeHtml(abschlussInfo.label)}</strong>
+        <p>${escapeHtml(abschlussInfo.detail)}</p>
+        ${renderBooleanBadge(canComplete, "Abnahmekriterien erfüllt", "Abnahmekriterien offen")}
+      </article>
+
+      <article class="panel dashboard-actions-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Schnellaktionen</p>
+            <h3>Eigene Anmeldung</h3>
+          </div>
+        </div>
+        <div class="quick-actions">
+          <button class="button primary" type="button" data-tab="theory">Theorie anmelden</button>
+          <button class="button primary" type="button" data-tab="practice">Praxis anmelden</button>
+          <button class="button primary" type="button" data-tab="exams">Prüfung anmelden</button>
+          <button class="button secondary" type="button" data-tab="completion">Abschluss anfragen</button>
+        </div>
       </article>
 
       ${renderProcessOverview(status)}
     </section>
+  `;
+}
+
+function abschlussRequestCounts() {
+  const all = state.abschlussAnfragenAlle.length ? state.abschlussAnfragenAlle : state.abschlussAnfragen;
+  const open = all.filter((request) => ["ANGEFRAGT", "IN_PRUEFUNG"].includes(request.status)).length;
+  const rejected = all.filter((request) => request.status === "ABGELEHNT").length;
+  const confirmed = all.filter((request) => ["BESTAETIGT", "ABGESCHLOSSEN"].includes(request.status)).length;
+  const theoryCriteria = all.filter((request) => request.theorieKriterienErfuellt).length;
+  const practiceCriteria = all.filter((request) => request.praxisKriterienErfuellt).length;
+  const confirmable = all.filter((request) => request.bestaetigungMoeglich).length;
+  return { all, open, rejected, confirmed, theoryCriteria, practiceCriteria, confirmable };
+}
+
+function renderAdminDashboard() {
+  const counts = abschlussRequestCounts();
+  const studentsCount = state.students.length;
+  const contractsCount = Object.values(state.studentStatuses).filter((status) => status?.vertragsStatus).length;
+  const contractTarget = state.selectedStudentId ? "contract-review" : "student-review";
+  const bpmnSteps = [
+    {
+      label: "Schülerdaten prüfen",
+      detail: studentsCount ? `${studentsCount} Schülerdatensätze verfügbar` : "Noch keine Schülerdaten vorhanden",
+      state: processStepState({ done: studentsCount > 0, active: studentsCount === 0 }, {})
+    },
+    {
+      label: "Ausbildungsvertrag prüfen",
+      detail: contractsCount ? `${contractsCount} Vertragsstatus erfasst` : "Vertragsdaten prüfen",
+      state: processStepState({ done: contractsCount > 0, active: studentsCount > 0 && contractsCount === 0 }, {})
+    },
+    {
+      label: "Schüler anlegen",
+      detail: "Neuanlage erfolgt über die Selbstverwaltung",
+      state: processStepState({ done: studentsCount > 0, active: studentsCount === 0 }, {})
+    },
+    {
+      label: "Beantragung des Schülers vorhanden?",
+      detail: counts.open ? `${counts.open} offene Abschlussanfrage(n)` : "Keine offene Abschlussanfrage",
+      state: processStepState({ done: counts.open > 0 || counts.confirmed > 0, active: counts.open === 0 }, {})
+    },
+    {
+      label: "Abnahmekriterien Theorie überprüfen",
+      detail: `${counts.theoryCriteria} Anfrage(n) mit erfüllter Theorie`,
+      state: processStepState({ done: counts.theoryCriteria > 0, active: counts.open > 0 && counts.theoryCriteria === 0 }, {})
+    },
+    {
+      label: "Abnahmekriterien Praxis überprüfen",
+      detail: `${counts.practiceCriteria} Anfrage(n) mit erfüllter Praxis`,
+      state: processStepState({ done: counts.practiceCriteria > 0, active: counts.open > 0 && counts.practiceCriteria === 0 }, {})
+    },
+    {
+      label: "Schüler Abschluss bestätigen",
+      detail: counts.confirmable ? `${counts.confirmable} Anfrage(n) bereit zur Bestätigung` : "Keine bestätigungsbereite Anfrage",
+      state: processStepState({ done: counts.confirmed > 0, active: counts.confirmable > 0, blocked: counts.open > 0 && counts.confirmable === 0 }, {})
+    }
+  ];
+
+  return `
+    <section class="dashboard-grid admin-dashboard">
+      <article class="panel hero-panel">
+        <div>
+          <p class="eyebrow">Verwaltungsdashboard</p>
+          <h2>Übersicht Verwaltungsbereich</h2>
+          <p class="muted">Hier können Schülerdaten geprüft, Verträge kontrolliert und Abschlussanfragen nach BPMN-Abnahmekriterien bearbeitet werden.</p>
+        </div>
+        ${renderBadge("SCHUELERVERWALTUNG", "info")}
+      </article>
+
+      <article class="metric-card">
+        <span>Anzahl Schüler</span>
+        <strong>${studentsCount}</strong>
+        <p>Datensätze in der Schülerverwaltung</p>
+      </article>
+
+      <article class="metric-card">
+        <span>Offene Abschlussanfragen</span>
+        <strong>${counts.open}</strong>
+        <p>Anfragen mit Status Angefragt oder In Prüfung</p>
+      </article>
+
+      <article class="metric-card">
+        <span>Abgelehnte Anfragen</span>
+        <strong>${counts.rejected}</strong>
+        <p>Abschlussanfragen mit Status Abgelehnt</p>
+      </article>
+
+      <article class="metric-card">
+        <span>Bestätigte Abschlüsse</span>
+        <strong>${counts.confirmed}</strong>
+        <p>Bestätigte oder abgeschlossene Abschlussanfragen</p>
+      </article>
+
+      <article class="panel dashboard-actions-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Schnellaktionen</p>
+            <h3>Selbstverwaltung</h3>
+          </div>
+        </div>
+        <div class="quick-actions">
+          <button class="button primary" type="button" data-tab="student-create">Schüler anlegen</button>
+          <button class="button secondary" type="button" data-tab="student-review">Schülerdaten prüfen</button>
+          <button class="button secondary" type="button" data-tab="${contractTarget}">Ausbildungsvertrag prüfen</button>
+          <button class="button secondary" type="button" data-tab="completion">Abschlussanfragen prüfen</button>
+        </div>
+      </article>
+
+      <article class="panel admin-bpmn-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">BPMN-Bezug</p>
+            <h3>Prozesspunkte der Verwaltung</h3>
+          </div>
+          ${renderBadge("Ausbildungsverwaltung.bpmn", "neutral")}
+        </div>
+        <div class="admin-bpmn-list">
+          ${bpmnSteps.map((step, index) => renderAdminBpmnStep(step, index)).join("")}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderAdminBpmnStep(step, index) {
+  return `
+    <div class="admin-bpmn-step ${step.state}">
+      <span class="step-index">${index + 1}</span>
+      <div>
+        <div class="step-head">
+          <strong>${escapeHtml(step.label)}</strong>
+          ${renderBadge(processStateLabel(step.state), processTone(step.state))}
+        </div>
+        <p>${escapeHtml(step.detail)}</p>
+      </div>
+    </div>
   `;
 }
 
@@ -1241,9 +1567,9 @@ function planningCards() {
       status: missingTheory > 0 ? `${formatHours(missingTheory)} h bis Mindestumfang` : "Prüfungsvoraussetzung erfüllt",
       badge: "Theorie",
       tone: missingTheory > 0 ? "warning" : "success",
-      blocked: blockedByStatus,
-      blockedReason: blockedByStatus ? "Ausbildung nicht mehr aktiv" : "",
-      draggable: !blockedByStatus
+      blocked: blockedByStatus || !canUseStudentActions(),
+      blockedReason: blockedByStatus ? "Ausbildung nicht mehr aktiv" : !canUseStudentActions() ? "Nur Schüler dürfen planen" : "",
+      draggable: !blockedByStatus && canUseStudentActions()
     });
   }
 
@@ -1258,8 +1584,9 @@ function planningCards() {
       status: course.lehrer ? `Dozent: ${course.lehrer}` : "Geplant",
       badge: "Theorie",
       tone: "info",
-      blocked: false,
-      draggable: true
+      blocked: !canUseStudentActions(),
+      blockedReason: !canUseStudentActions() ? "Nur Schüler dürfen Buchungen ändern" : "",
+      draggable: canUseStudentActions()
     });
   });
 
@@ -1267,7 +1594,7 @@ function planningCards() {
     const missingPractice = Math.max(0, minFlightHours - flightHours);
     const hasAvailablePilot = PILOT_OPTIONS.some((pilot) => pilot.available);
     const hasAvailableAircraft = AIRCRAFT_OPTIONS.some((aircraft) => aircraft.available);
-    const blocked = blockedByStatus || !hasAvailablePilot || !hasAvailableAircraft;
+    const blocked = blockedByStatus || !hasAvailablePilot || !hasAvailableAircraft || !canUseStudentActions();
     cards.push({
       id: `practice-request-${student.id}`,
       type: "practice-request",
@@ -1279,7 +1606,7 @@ function planningCards() {
       badge: "Praxis",
       tone: missingPractice > 0 ? "warning" : "success",
       blocked,
-      blockedReason: blockedByStatus ? "Ausbildung nicht mehr aktiv" : "Kein verfügbarer Pilot oder kein verfügbares Flugzeug",
+      blockedReason: blockedByStatus ? "Ausbildung nicht mehr aktiv" : !canUseStudentActions() ? "Nur Schüler dürfen planen" : "Kein verfügbarer Pilot oder kein verfügbares Flugzeug",
       draggable: !blocked
     });
   }
@@ -1419,38 +1746,102 @@ function renderPlanningCard(card) {
   `;
 }
 
-function renderStudentsView() {
-  const student = selectedStudent();
-  const results = filteredStudents();
+function renderManagementHomeView() {
   return `
     <section class="stack-layout">
+      <article class="panel hero-panel">
+        <div>
+          <p class="eyebrow">Selbstverwaltung</p>
+          <h2>Schülerverwaltung</h2>
+          <p class="muted">Hier können Schülerdaten geprüft und Abschlussanfragen bestätigt werden.</p>
+        </div>
+        ${renderBadge("SCHUELERVERWALTUNG", "info")}
+      </article>
+
+      <section class="status-summary" aria-label="Verwaltungsfunktionen">
+        <article>
+          <span>Schüler anlegen</span>
+          <p>Neue Demo-Schüler mit Vertrag und Startdaten erfassen.</p>
+          <button class="button secondary small" type="button" data-tab="student-create">Öffnen</button>
+        </article>
+        <article>
+          <span>Schülerdaten prüfen</span>
+          <p>Schüler suchen, auswählen und Detaildaten kontrollieren.</p>
+          <button class="button secondary small" type="button" data-tab="student-review">Öffnen</button>
+        </article>
+        <article>
+          <span>Ausbildungsvertrag prüfen</span>
+          <p>Vertragsstatus und Ausbildungszeitraum des gewählten Schülers prüfen.</p>
+          <button class="button secondary small" type="button" data-tab="contract-review">Öffnen</button>
+        </article>
+        <article>
+          <span>Abschlussanfragen prüfen</span>
+          <p>Abnahmekriterien prüfen und bereite Abschlüsse bestätigen.</p>
+          <button class="button secondary small" type="button" data-tab="completion">Öffnen</button>
+        </article>
+      </section>
+    </section>
+  `;
+}
+
+function renderStudentCreateForm() {
+  return `
+    <form id="studentCreateForm" class="form-grid">
+      <label>Vorname<input name="vorname" placeholder="Alex" required></label>
+      <label>Nachname<input name="name" placeholder="Muster" required></label>
+      <label>Ausbildungsbeginn<input name="startzeit" type="date" value="${todayDate()}"></label>
+      <label>Theoriestunden<input name="theorieStunden" type="number" min="0" step="0.5" value="0"></label>
+      <label>Flugstunden<input name="flugStunden" type="number" min="0" step="0.5" value="0"></label>
+      <label>Vertragsstatus
+        <select name="vertragsStatus">
+          <option>Unterschrieben</option>
+          <option>Abgeschlossen</option>
+          <option>Abgebrochen</option>
+        </select>
+      </label>
+      <label class="full">Notiz<textarea name="notiz" rows="2" placeholder="Manuell angelegter Demo-Schüler"></textarea></label>
+      <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>
+        ${state.action ? "Anlegen läuft..." : "Schüler anlegen"}
+      </button>
+    </form>
+  `;
+}
+
+function renderStudentCreateView() {
+  return `
+    <section class="two-column">
       <div class="panel">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Globale Optionen</p>
-            <h3>Demo-Schüler anlegen</h3>
+            <p class="eyebrow">Selbstverwaltung</p>
+            <h3>Schüler anlegen</h3>
+            <p class="muted">Neue Schüler werden im Demo-Modus persistent gespeichert.</p>
           </div>
         </div>
-        <form id="studentCreateForm" class="form-grid">
-          <label>Vorname<input name="vorname" placeholder="Alex" required></label>
-          <label>Nachname<input name="name" placeholder="Muster" required></label>
-          <label>Ausbildungsbeginn<input name="startzeit" type="date" value="${todayDate()}"></label>
-          <label>Theoriestunden<input name="theorieStunden" type="number" min="0" step="0.5" value="0"></label>
-          <label>Flugstunden<input name="flugStunden" type="number" min="0" step="0.5" value="0"></label>
-          <label>Vertragsstatus
-            <select name="vertragsStatus">
-              <option>Unterschrieben</option>
-              <option>Abgeschlossen</option>
-              <option>Abgebrochen</option>
-            </select>
-          </label>
-          <label class="full">Notiz<textarea name="notiz" rows="2" placeholder="Manuell angelegter Demo-Schüler"></textarea></label>
-          <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>
-            ${state.action ? "Anlegen läuft..." : "Schüler anlegen"}
-          </button>
-        </form>
+        ${renderStudentCreateForm()}
       </div>
 
+      <aside class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Hinweis</p>
+            <h3>Nach dem Anlegen</h3>
+          </div>
+        </div>
+        <p class="muted">Der neue Datensatz erscheint in der Schülerliste und kann anschließend über „Schülerdaten prüfen“ ausgewählt werden.</p>
+        <button class="button secondary" type="button" data-tab="student-review">Zur Schülerliste</button>
+      </aside>
+    </section>
+  `;
+}
+
+function renderStudentsView() {
+  const student = selectedStudent();
+  const results = filteredStudents();
+  const cachedStatus = student ? studentStatus(student.id) : null;
+  const selectedStatus = cachedStatus?.schuelerId ? cachedStatus : state.status?.schuelerId === student?.id ? state.status : null;
+  return `
+    <section class="stack-layout">
       <section class="two-column">
         <div class="panel">
           <div class="section-head">
@@ -1477,6 +1868,7 @@ function renderStudentsView() {
           ${student ? renderStudentDetails(student) : `<p class="muted">Kein Schüler ausgewählt.</p>`}
         </aside>
       </section>
+      ${selectedStatus ? renderProcessOverview(selectedStatus) : ""}
     </section>
   `;
 }
@@ -1517,7 +1909,7 @@ function renderStudentsTable(students = state.students) {
                   <button class="button small" type="button" data-select-student="${escapeHtml(student.id)}" ${state.action ? "disabled" : ""}>
                     Auswählen
                   </button>
-                  <button class="button small danger" type="button" data-delete-student="${escapeHtml(student.id)}" ${state.action ? "disabled" : ""}>
+                  <button class="button small danger" type="button" data-delete-student="${escapeHtml(student.id)}" ${!canUseManagementActions() || state.action ? "disabled" : ""}>
                     Löschen
                   </button>
                   ${contextButton("student", student.id, "Schüleraktionen")}
@@ -1553,12 +1945,65 @@ function renderStudentDetails(student) {
   `;
 }
 
+function renderContractReviewView() {
+  const student = selectedStudent();
+  const results = filteredStudents();
+  const vertrag = state.selectedVertrag;
+  if (!student) {
+    return renderEmptyState("Bitte zuerst einen Schüler für die Vertragsprüfung auswählen.");
+  }
+  const status = studentStatus(student.id);
+  return `
+    <section class="two-column">
+      <div class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Selbstverwaltung</p>
+            <h3>Ausbildungsvertrag prüfen</h3>
+            <p class="muted">Wähle links einen Schüler aus, um Vertragsstatus und Ausbildungszeitraum zu prüfen.</p>
+          </div>
+        </div>
+        ${renderStudentFilters()}
+        ${state.students.length ? renderStudentsTable(results) : `<p class="muted">Keine Schüler vorhanden.</p>`}
+      </div>
+
+      <aside class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Vertrag</p>
+            <h3>${escapeHtml(studentFullName(student))}</h3>
+          </div>
+          ${renderBadge(status.vertragsStatus || contractStatus(student), "neutral")}
+        </div>
+        <dl class="details">
+          <div><dt>Schüler-ID</dt><dd>${escapeHtml(student.id)}</dd></div>
+          <div><dt>Ausbildungsvertrag</dt><dd>${escapeHtml(vertrag?.id || student.ausbildungsVertragId || "-")}</dd></div>
+          <div><dt>Vertragsstatus</dt><dd>${escapeHtml(vertrag?.status || status.vertragsStatus || contractStatus(student))}</dd></div>
+          <div><dt>Prüfstatus</dt><dd>${renderBooleanBadge(Boolean(vertrag?.geprueft), "Geprüft", "Offen")}</dd></div>
+          <div><dt>Ausbildungsbeginn</dt><dd>${formatDate(vertrag?.startzeit || student.startzeit)}</dd></div>
+          <div><dt>Geplantes Ende</dt><dd>${formatDate(vertrag?.endzeit || student.endzeit)}</dd></div>
+          <div><dt>Gesamtstatus</dt><dd>${renderBadge(statusLabel(status.status), trainingWorkflowStatus(status).tone)}</dd></div>
+          <div><dt>Vertragsnotiz</dt><dd>${escapeHtml(vertrag?.notiz || "-")}</dd></div>
+        </dl>
+        <form id="contractReviewForm" class="form-grid single">
+          <label>Prüfer<input name="pruefer" value="${escapeHtml(state.displayName || "Schülerverwaltung")}"></label>
+          <label>Bemerkung<textarea name="bemerkung" rows="2" placeholder="Vertrag fachlich geprüft"></textarea></label>
+          <button class="button primary" type="submit" ${state.action ? "disabled" : ""}>
+            ${state.action ? "Prüfung läuft..." : "Vertrag prüfen"}
+          </button>
+        </form>
+      </aside>
+    </section>
+  `;
+}
+
 function renderTheoryView() {
   const progress = state.theorie?.fortschritt || {};
   const courses = state.theorie?.kurse || [];
   const filteredCourses = filteredByTableSearch(courses, "courses", (course) => `${course.id} ${course.tag} ${course.typ} ${course.lehrer}`);
   const unlocked = Boolean(progress.theoriePruefungFreigeschaltet);
   const theory = theoryWorkflowStatus(state.status || {});
+  const canBook = canUseStudentActions();
 
   return `
     <section class="stack-layout">
@@ -1601,7 +2046,8 @@ function renderTheoryView() {
             <label>Dauer Minuten<input name="dauerMinuten" type="number" min="15" step="15" value="90" required></label>
             <label>Dozent<input name="dozent" placeholder="Elias Schulz" required></label>
             <label class="full">Notizen<textarea name="notizen" rows="3" placeholder="Optionale Hinweise"></textarea></label>
-            <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>
+            ${!canBook ? `<p class="alert info full">Nur die Rolle Schüler darf Theoriekurse buchen.</p>` : ""}
+            <button class="button primary full" type="submit" ${!canBook || state.action ? "disabled" : ""}>
               ${state.action ? "Buchung läuft..." : "Theoriekurs buchen"}
             </button>
           </form>
@@ -1620,7 +2066,8 @@ function renderTheoryView() {
           <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(7)}" required></label>
           <label>Prüfer<input name="pruefer" placeholder="P001"></label>
           <label class="full">Bemerkung<textarea name="bemerkung" rows="2" placeholder="Erstanmeldung"></textarea></label>
-          <button class="button primary full" type="submit" ${!unlocked || state.action ? "disabled" : ""}>
+          ${!canBook ? `<p class="alert info full">Nur die Rolle Schüler darf Prüfungen anmelden.</p>` : ""}
+          <button class="button primary full" type="submit" ${!canBook || !unlocked || state.action ? "disabled" : ""}>
             ${state.action ? "Anmeldung läuft..." : "Theorieprüfung anmelden"}
           </button>
         </form>
@@ -1656,7 +2103,7 @@ function renderCoursesTable(courses) {
               <td>${Number(course.dauerMinuten || 60)} min</td>
               <td>
                 <div class="row-actions">
-                  <button class="button small danger" type="button" data-cancel-course="${escapeHtml(course.id)}" ${state.action ? "disabled" : ""}>
+                  <button class="button small danger" type="button" data-cancel-course="${escapeHtml(course.id)}" ${!canUseStudentActions() || state.action ? "disabled" : ""}>
                     Stornieren
                   </button>
                   ${contextButton("course", course.id, "Kursaktionen")}
@@ -1749,7 +2196,7 @@ function renderPilotModalRows() {
       <td>${escapeHtml(pilot.license)}</td>
       <td>${renderBadge(pilot.note, pilot.available ? "success" : "warning")}</td>
       <td>
-        <button class="button small" type="button" data-select-pilot="${escapeHtml(pilot.id)}" ${pilot.available || state.practiceSelection.pilotId === pilot.id ? "" : "disabled"}>
+        <button class="button small" type="button" data-select-pilot="${escapeHtml(pilot.id)}" ${canUseStudentActions() && (pilot.available || state.practiceSelection.pilotId === pilot.id) ? "" : "disabled"}>
           ${state.practiceSelection.pilotId === pilot.id ? "Ausgewaehlt" : "Waehlen"}
         </button>
       </td>
@@ -1766,7 +2213,7 @@ function renderAircraftModalRows() {
       <td>${renderBadge(aircraft.status, aircraft.available ? "success" : "warning")}</td>
       <td>${escapeHtml(aircraft.maintenance)}</td>
       <td>
-        <button class="button small" type="button" data-select-aircraft="${escapeHtml(aircraft.id)}" ${aircraft.available || state.practiceSelection.aircraftId === aircraft.id ? "" : "disabled"}>
+        <button class="button small" type="button" data-select-aircraft="${escapeHtml(aircraft.id)}" ${canUseStudentActions() && (aircraft.available || state.practiceSelection.aircraftId === aircraft.id) ? "" : "disabled"}>
           ${state.practiceSelection.aircraftId === aircraft.id ? "Ausgewaehlt" : "Waehlen"}
         </button>
         ${contextButton("aircraft", aircraft.id, "Flugzeugaktionen")}
@@ -1780,6 +2227,7 @@ function renderPracticeView() {
   const flights = state.praxis?.fluege || [];
   const unlocked = Boolean(progress.praxisPruefungFreigeschaltet);
   const practice = practiceWorkflowStatus(state.status || {});
+  const canBook = canUseStudentActions();
 
   return `
     <section class="stack-layout">
@@ -1825,7 +2273,8 @@ function renderPracticeView() {
             <label>Zielflughafen<input name="zielFlughafen" value="EDDV" required></label>
             <label>Ausbildungsinhalt<input name="ausbildungsinhalt" placeholder="Platzrunde" required></label>
             <label class="full">Notizen<textarea name="notizen" rows="3" placeholder="Optional"></textarea></label>
-            <button class="button primary full" type="submit" ${state.action ? "disabled" : ""}>
+            ${!canBook ? `<p class="alert info full">Nur die Rolle Schüler darf Flugstunden buchen.</p>` : ""}
+            <button class="button primary full" type="submit" ${!canBook || state.action ? "disabled" : ""}>
               ${state.action ? "Buchung läuft..." : "Flugstunde buchen"}
             </button>
           </form>
@@ -1844,7 +2293,8 @@ function renderPracticeView() {
           <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(10)}" required></label>
           <label>Prüfer<input name="pruefer" placeholder="P002"></label>
           <label class="full">Bemerkung<textarea name="bemerkung" rows="2" placeholder="Praxisprüfung"></textarea></label>
-          <button class="button primary full" type="submit" ${!unlocked || state.action ? "disabled" : ""}>
+          ${!canBook ? `<p class="alert info full">Nur die Rolle Schüler darf Prüfungen anmelden.</p>` : ""}
+          <button class="button primary full" type="submit" ${!canBook || !unlocked || state.action ? "disabled" : ""}>
             ${state.action ? "Anmeldung läuft..." : "Praxisprüfung anmelden"}
           </button>
         </form>
@@ -1876,7 +2326,7 @@ function renderFlightsTable(flights) {
               <td>${escapeHtml(flight.startFlughafen)} → ${escapeHtml(flight.zielFlughafen)}</td>
               <td>${escapeHtml(flight.flugArt)}</td>
               <td>
-                <button class="button small danger" type="button" data-cancel-flight="${escapeHtml(flight.id)}" ${state.action ? "disabled" : ""}>
+                <button class="button small danger" type="button" data-cancel-flight="${escapeHtml(flight.id)}" ${!canUseStudentActions() || state.action ? "disabled" : ""}>
                   Stornieren
                 </button>
                 ${contextButton("flight", flight.id, "Flugstundenaktionen")}
@@ -1889,10 +2339,84 @@ function renderFlightsTable(flights) {
   `;
 }
 
+function renderExamRegistrationView() {
+  const exams = state.pruefungen || [];
+  const status = state.status || {};
+  const theoryUnlocked = Boolean(status.theoriePruefungFreigeschaltet);
+  const practiceUnlocked = Boolean(status.praxisPruefungFreigeschaltet);
+  const examInfo = examWorkflowStatus(status, exams);
+  return `
+    <section class="stack-layout">
+      <article class="panel hero-panel">
+        <div>
+          <p class="eyebrow">Prüfung anmelden</p>
+          <h2>Theorie- und Praxisprüfung</h2>
+          <p class="muted">Hier kannst du deine Prüfungsanmeldungen verwalten, sobald die Abnahmekriterien erfüllt sind.</p>
+        </div>
+        ${renderBadge(examInfo.label, examInfo.tone)}
+      </article>
+
+      <section class="two-column">
+        <div class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Theorieprüfung</p>
+              <h3>Anmelden</h3>
+            </div>
+            ${renderBooleanBadge(theoryUnlocked, "Anmeldung möglich", "Mindeststunden fehlen")}
+          </div>
+          <form id="theoryExamForm" class="form-grid single">
+            <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(7)}" required></label>
+            <label>Prüfer<input name="pruefer" placeholder="P001"></label>
+            <label>Bemerkung<textarea name="bemerkung" rows="2" placeholder="Erstanmeldung"></textarea></label>
+            <button class="button primary" type="submit" ${!theoryUnlocked || state.action ? "disabled" : ""}>
+              ${state.action ? "Anmeldung läuft..." : "Theorieprüfung anmelden"}
+            </button>
+          </form>
+        </div>
+
+        <div class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Praxisprüfung</p>
+              <h3>Anmelden</h3>
+            </div>
+            ${renderBooleanBadge(practiceUnlocked, "Anmeldung möglich", "Mindestflugstunden fehlen")}
+          </div>
+          <form id="practiceExamForm" class="form-grid single">
+            <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(10)}" required></label>
+            <label>Prüfer<input name="pruefer" placeholder="P002"></label>
+            <label>Bemerkung<textarea name="bemerkung" rows="2" placeholder="Erstanmeldung"></textarea></label>
+            <button class="button primary" type="submit" ${!practiceUnlocked || state.action ? "disabled" : ""}>
+              ${state.action ? "Anmeldung läuft..." : "Praxisprüfung anmelden"}
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Status</p>
+            <h3>Angemeldete Prüfungen</h3>
+          </div>
+          ${renderBadge(`${exams.length} Prüfungen`, "neutral")}
+        </div>
+        ${exams.length ? renderExamsTable(exams) : `<p class="muted">Noch keine Prüfungen vorhanden.</p>`}
+      </section>
+    </section>
+  `;
+}
+
 function renderExamsView() {
+  if (isStudentRole()) {
+    return renderExamRegistrationView();
+  }
+
   const filteredExams = filteredByTableSearch(state.pruefungen, "exams", (exam) => `${exam.id} ${exam.datum} ${exam.typ}`);
   const selectedExam = state.pruefungen.find((exam) => exam.id === state.examResultSelection) || state.pruefungen[0] || null;
   const examInfo = examWorkflowStatus(state.status || {}, state.pruefungen);
+  const canSaveResults = canUseManagementActions();
   return `
     <section class="two-column">
       <div class="panel">
@@ -1942,7 +2466,8 @@ function renderExamsView() {
           </label>
           <label>Ergebnistext<input name="ergebnisText" placeholder="Prüfung bestanden"></label>
           <label>Notizen<textarea name="notizen" rows="3" placeholder="Optionale Details"></textarea></label>
-          <button class="button primary" type="submit" ${!state.pruefungen.length || state.action ? "disabled" : ""}>
+          ${!canSaveResults ? `<p class="alert info">Nur die Rolle Schülerverwaltung darf Prüfungsergebnisse speichern.</p>` : ""}
+          <button class="button primary" type="submit" ${!canSaveResults || !state.pruefungen.length || state.action ? "disabled" : ""}>
             ${state.action ? "Speichern läuft..." : "Ergebnis speichern"}
           </button>
         </form>
@@ -1980,10 +2505,12 @@ function renderExamsTable(exams = state.pruefungen) {
                 ${state.repeatMarkers[exam.id] ? renderBadge("Wiederholung", "warning") : ""}
               </td>
               <td>
-                <button class="button small" type="button" data-select-exam="${escapeHtml(exam.id)}" ${state.action ? "disabled" : ""}>
-                  ${exam.id === state.examResultSelection ? "Ausgewaehlt" : "Waehlen"}
-                </button>
-                ${contextButton("exam", exam.id, "Prüfungsaktionen")}
+                ${canUseManagementActions() ? `
+                  <button class="button small" type="button" data-select-exam="${escapeHtml(exam.id)}" ${state.action ? "disabled" : ""}>
+                    ${exam.id === state.examResultSelection ? "Ausgewaehlt" : "Waehlen"}
+                  </button>
+                  ${contextButton("exam", exam.id, "Prüfungsaktionen")}
+                ` : `<span class="muted">Keine Aktion</span>`}
               </td>
             </tr>
           `;}).join("")}
@@ -1994,10 +2521,23 @@ function renderExamsTable(exams = state.pruefungen) {
 }
 
 function renderCompletionView() {
+  return isManagementRole() ? renderCompletionReviewView() : renderStudentCompletionView();
+}
+
+function renderStudentCompletionView() {
   const status = state.status || {};
-  const canComplete = Boolean(status.theorieBestanden && status.praxisBestanden);
-  const completed = status.status === "ABGESCHLOSSEN";
+  const request = state.abschlussAnfrage || {
+    status: "KEINE_ANFRAGE",
+    theorieKriterienErfuellt: Boolean(status.theorieBestanden),
+    praxisKriterienErfuellt: Boolean(status.praxisBestanden),
+    bestaetigungMoeglich: false
+  };
+  const requestStatus = request.status || "KEINE_ANFRAGE";
+  const requestOpen = ["ANGEFRAGT", "IN_PRUEFUNG", "BESTAETIGT", "ABGESCHLOSSEN"].includes(requestStatus);
+  const completed = status.status === "ABGESCHLOSSEN" || requestStatus === "ABGESCHLOSSEN";
   const training = trainingWorkflowStatus(status);
+  const abschluss = abschlussWorkflowStatus(status);
+  const canRequest = !requestOpen && !completed && !state.action;
 
   return `
     <section class="two-column">
@@ -2007,30 +2547,108 @@ function renderCompletionView() {
             <p class="eyebrow">Gesamtstatus</p>
             <h3>${escapeHtml(training.label)}</h3>
           </div>
-          ${renderBadge(status.vertragsStatus || "Unbekannt", training.tone)}
+          ${renderBadge(abschluss.label, abschluss.tone)}
         </div>
         <dl class="details">
-          <div><dt>Theorieprüfung bestanden</dt><dd>${renderBooleanBadge(status.theorieBestanden, "Ja", "Nein")}</dd></div>
-          <div><dt>Praxisprüfung bestanden</dt><dd>${renderBooleanBadge(status.praxisBestanden, "Ja", "Nein")}</dd></div>
-          <div><dt>Theorie freigeschaltet</dt><dd>${yesNo(status.theoriePruefungFreigeschaltet)}</dd></div>
-          <div><dt>Praxis freigeschaltet</dt><dd>${yesNo(status.praxisPruefungFreigeschaltet)}</dd></div>
-          <div><dt>Prüfungsreif</dt><dd>${yesNo(status.pruefungsreif)}</dd></div>
+          <div><dt>Abschlussanfrage</dt><dd>${renderBadge(abschlussStatusLabel(requestStatus), abschluss.tone)}</dd></div>
+          <div><dt>Theorie-Abnahmekriterien</dt><dd>${renderBooleanBadge(request.theorieKriterienErfuellt, "Erfüllt", "Offen")}</dd></div>
+          <div><dt>Praxis-Abnahmekriterien</dt><dd>${renderBooleanBadge(request.praxisKriterienErfuellt, "Erfüllt", "Offen")}</dd></div>
+          <div><dt>Bestätigung möglich</dt><dd>${renderBooleanBadge(request.bestaetigungMoeglich, "Ja", "Nein")}</dd></div>
           <div><dt>Theoriestunden</dt><dd>${formatHours(status.theorieStunden)} h</dd></div>
           <div><dt>Flugstunden</dt><dd>${formatHours(status.flugStunden)} h</dd></div>
+          <div><dt>Begründung</dt><dd>${escapeHtml(request.begruendung || "-")}</dd></div>
         </dl>
       </div>
 
       <aside class="panel action-panel">
         <p class="eyebrow">Abschluss</p>
-        <h3>Ausbildung abschließen</h3>
+        <h3>Abschluss anfragen</h3>
         <p class="muted">
-          Der Abschluss ist nur möglich, wenn Theorie- und Praxisprüfung bestanden sind.
+          Du kannst eine Abschlussanfrage stellen. Die Schülerverwaltung prüft danach, ob Theorie- und Praxis-Abnahmekriterien erfüllt sind.
         </p>
-        <button class="button primary" type="button" id="completeTrainingButton" ${!canComplete || completed || state.action ? "disabled" : ""}>
-          ${state.action ? "Abschluss läuft..." : completed ? "Bereits abgeschlossen" : "Ausbildung abschließen"}
+        <button class="button primary" type="button" id="requestCompletionButton" ${!canRequest ? "disabled" : ""}>
+          ${state.action ? "Anfrage läuft..." : completed ? "Bereits abgeschlossen" : requestOpen ? "Anfrage liegt vor" : "Abschluss anfragen"}
         </button>
       </aside>
     </section>
+  `;
+}
+
+function renderCompletionReviewView() {
+  const requests = state.abschlussAnfragen || [];
+  return `
+    <section class="stack-layout">
+      <article class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Prüfungsverwaltung</p>
+            <h3>Abschlussanfragen prüfen</h3>
+          </div>
+          ${renderBadge(`${requests.length} offen`, requests.length ? "info" : "neutral")}
+        </div>
+        <p class="muted">
+          Hier prüft die Schülerverwaltung, ob eine Beantragung vorhanden ist und ob Theorie- und Praxis-Abnahmekriterien erfüllt sind.
+        </p>
+      </article>
+
+      <article class="panel">
+        ${renderCompletionRequestsTable(requests)}
+      </article>
+    </section>
+  `;
+}
+
+function renderCompletionRequestsTable(requests) {
+  if (!requests.length) {
+    return `<p class="muted empty-inline">Keine offenen Abschlussanfragen vorhanden.</p>`;
+  }
+
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Anfrage</th>
+            <th>Schüler</th>
+            <th>Status</th>
+            <th>Abnahmekriterien</th>
+            <th>Angefragt am</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${requests.map((request) => {
+            const student = state.students.find((entry) => entry.id === request.schuelerId);
+            return `
+              <tr>
+                <td><strong>${escapeHtml(request.id)}</strong></td>
+                <td>${escapeHtml(student ? studentFullName(student) : request.schuelerId)}</td>
+                <td>${renderBadge(abschlussStatusLabel(request.status), request.bestaetigungMoeglich ? "success" : "info")}</td>
+                <td>
+                  <div class="badge-row">
+                    ${renderBooleanBadge(request.theorieKriterienErfuellt, "Theorie erfüllt", "Theorie offen")}
+                    ${renderBooleanBadge(request.praxisKriterienErfuellt, "Praxis erfüllt", "Praxis offen")}
+                  </div>
+                </td>
+                <td>${formatDateTime(request.angefragtAm)}</td>
+                <td class="table-actions">
+                  <button class="button secondary small" type="button" data-select-student="${escapeHtml(request.schuelerId)}" ${state.action ? "disabled" : ""}>
+                    Details
+                  </button>
+                  <button class="button primary small" type="button" data-confirm-completion-request="${escapeHtml(request.id)}"
+                    ${!request.bestaetigungMoeglich || state.action ? "disabled" : ""}>
+                    Bestätigen
+                  </button>
+                  <button class="button danger small" type="button" data-reject-completion-request="${escapeHtml(request.id)}" ${state.action ? "disabled" : ""}>
+                    Ablehnen
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -2092,15 +2710,28 @@ async function handleLogin(form) {
       body: values
     });
     state.token = response.token;
+    state.username = response.username || values.username;
     state.displayName = response.displayName || values.username;
+    state.role = response.role || "";
+    state.schuelerId = response.schuelerId || "";
+    if (state.role === "SCHUELER" && state.schuelerId) {
+      state.selectedStudentId = state.schuelerId;
+    }
     localStorage.setItem(STORAGE.token, state.token);
+    localStorage.setItem(STORAGE.username, state.username);
     localStorage.setItem(STORAGE.displayName, state.displayName);
+    localStorage.setItem(STORAGE.role, state.role);
+    localStorage.setItem(STORAGE.schuelerId, state.schuelerId);
     await loadStudents();
     await loadSelectedStudentData();
+    await loadAbschlussData();
   }, "Login erfolgreich.");
 }
 
 async function handleTheoryBooking(form) {
+  if (!canUseStudentActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
   const values = readForm(form);
   requireFields(values, ["thema", "termin", "dauerMinuten", "dozent"]);
   const body = {
@@ -2116,6 +2747,9 @@ async function handleTheoryBooking(form) {
 }
 
 async function handleStudentCreate(form) {
+  if (!canUseManagementActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
   const values = readForm(form);
   requireFields(values, ["vorname", "name"]);
   const body = {
@@ -2129,13 +2763,33 @@ async function handleStudentCreate(form) {
   };
 
   await runAction(async () => {
-    const created = await api("/schueler", { method: "POST", body });
+    const created = await api("/verwaltung/schueler", { method: "POST", body });
     state.selectedStudentId = created.id;
     localStorage.setItem(STORAGE.selectedStudentId, created.id);
   }, "Schüler wurde angelegt.");
 }
 
+async function handleContractReview(form) {
+  if (!canUseManagementActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
+  const values = readForm(form);
+  const body = {
+    pruefer: values.pruefer || state.displayName || "Schuelerverwaltung",
+    bemerkung: values.bemerkung || "Vertrag fachlich geprueft"
+  };
+  await runAction(async () => {
+    state.selectedVertrag = await api(
+      `/verwaltung/schueler/${encodeURIComponent(ensureStudentId())}/vertrag/pruefen`,
+      { method: "POST", body }
+    );
+  }, "Ausbildungsvertrag wurde geprüft.");
+}
+
 async function handleTheoryExam(form) {
+  if (!canUseStudentActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
   const values = readForm(form);
   requireFields(values, ["wunschtermin"]);
   const body = {
@@ -2150,11 +2804,17 @@ async function handleTheoryExam(form) {
 }
 
 async function handlePracticeBooking(form) {
+  if (!canUseStudentActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
   const body = practicePayload(readForm(form));
   await runAction(() => api("/praxis/buchen", { method: "POST", body }), "Flugstunde wurde gebucht.");
 }
 
 async function handlePracticeExam(form) {
+  if (!canUseStudentActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
   const values = readForm(form);
   requireFields(values, ["wunschtermin"]);
   const body = {
@@ -2169,6 +2829,9 @@ async function handlePracticeExam(form) {
 }
 
 async function handleExamResult(form) {
+  if (!canUseManagementActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
   const values = readForm(form);
   requireFields(values, ["pruefungId", "pruefungsart", "datum", "bestanden"]);
   const body = {
@@ -2199,7 +2862,7 @@ async function logout() {
 async function selectStudentForView(studentId, view) {
   state.selectedStudentId = studentId;
   if (view) {
-    state.view = view;
+    navigateToView(view);
   }
   localStorage.setItem(STORAGE.selectedStudentId, state.selectedStudentId);
   await refreshAll();
@@ -2265,6 +2928,11 @@ function showAircraftDetails(aircraftId, maintenanceOnly = false) {
 }
 
 async function registerTheoryExamFromContext() {
+  if (!canUseStudentActions()) {
+    setMessage("error", "Keine Berechtigung für diese Funktion.");
+    render();
+    return;
+  }
   if (!state.theorie?.fortschritt?.theoriePruefungFreigeschaltet && !state.status?.theoriePruefungFreigeschaltet) {
     setMessage("error", "Theorieprüfung ist noch nicht freigeschaltet.");
     render();
@@ -2282,6 +2950,11 @@ async function registerTheoryExamFromContext() {
 }
 
 async function registerPracticeExamFromContext() {
+  if (!canUseStudentActions()) {
+    setMessage("error", "Keine Berechtigung für diese Funktion.");
+    render();
+    return;
+  }
   if (!state.praxis?.fortschritt?.praxisPruefungFreigeschaltet && !state.status?.praxisPruefungFreigeschaltet) {
     setMessage("error", "Praxisprüfung ist noch nicht freigeschaltet.");
     render();
@@ -2299,6 +2972,11 @@ async function registerPracticeExamFromContext() {
 }
 
 async function cancelFlight(flightId) {
+  if (!canUseStudentActions()) {
+    setMessage("error", "Keine Berechtigung für diese Funktion.");
+    render();
+    return;
+  }
   const reason = window.prompt("Grund für die Stornierung:", "Termin verschoben");
   if (reason === null) {
     return;
@@ -2312,6 +2990,11 @@ async function cancelFlight(flightId) {
 }
 
 async function cancelCourse(courseId) {
+  if (!canUseStudentActions()) {
+    setMessage("error", "Keine Berechtigung für diese Funktion.");
+    render();
+    return;
+  }
   const reason = window.prompt("Grund für die Stornierung:", "Termin verschoben");
   if (reason === null) {
     return;
@@ -2320,6 +3003,11 @@ async function cancelCourse(courseId) {
 }
 
 async function cancelCourseFromPlanning(courseId) {
+  if (!canUseStudentActions()) {
+    setMessage("error", "Keine Berechtigung für diese Funktion.");
+    render();
+    return;
+  }
   const student = selectedStudent();
   if (!window.confirm(`Theoriestunde ${courseId} wieder aus der Planung herausziehen und stornieren?`)) {
     return;
@@ -2347,6 +3035,11 @@ function selectExamForResult(examId) {
 }
 
 function markExamRepeat(examId) {
+  if (!canUseManagementActions()) {
+    setMessage("error", "Keine Berechtigung für diese Funktion.");
+    render();
+    return;
+  }
   const exam = state.pruefungen.find((entry) => entry.id === examId);
   state.examResultSelection = examId;
   state.view = "exams";
@@ -2360,6 +3053,11 @@ function markExamRepeat(examId) {
 }
 
 function selectAircraftForBooking(aircraftId) {
+  if (!canUseStudentActions()) {
+    setMessage("error", "Keine Berechtigung für diese Funktion.");
+    render();
+    return;
+  }
   const aircraft = aircraftById(aircraftId);
   if (!aircraft?.available) {
     setMessage("error", "Dieses Flugzeug ist nicht für Buchungen verfügbar.");
@@ -2408,6 +3106,9 @@ function planningDropError(cardType, targetColumnId) {
 }
 
 async function planTheoryFromDrop() {
+  if (!canUseStudentActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
   const student = selectedStudent();
   if (!student) {
     throw new Error("Bitte zuerst einen Schüler auswählen.");
@@ -2427,6 +3128,9 @@ async function planTheoryFromDrop() {
 }
 
 async function planPracticeFromDrop() {
+  if (!canUseStudentActions()) {
+    throw new Error("Keine Berechtigung für diese Funktion.");
+  }
   const student = selectedStudent();
   const pilot = availablePilot();
   const aircraft = availableAircraft();
@@ -2491,15 +3195,15 @@ async function handleContextMenuAction(action) {
 
   try {
     if (action === "student-details") {
-      await selectStudentForView(menu.id, "students");
+      await selectStudentForView(menu.id, "student-review");
     } else if (action === "student-status") {
       await selectStudentForView(menu.id, "dashboard");
-    } else if (action === "student-theory") {
-      await selectStudentForView(menu.id, "theory");
-    } else if (action === "student-practice") {
-      await selectStudentForView(menu.id, "practice");
-    } else if (action === "student-exams") {
-      await selectStudentForView(menu.id, "exams");
+    } else if (action === "student-review") {
+      await selectStudentForView(menu.id, "student-review");
+    } else if (action === "student-contract") {
+      await selectStudentForView(menu.id, "contract-review");
+    } else if (action === "student-completion") {
+      await selectStudentForView(menu.id, "completion");
     } else if (action === "course-details") {
       showCourseDetails(menu.id);
       render();
@@ -2546,6 +3250,8 @@ app.addEventListener("submit", async (event) => {
       await handleLogin(form);
     } else if (form.id === "studentCreateForm") {
       await handleStudentCreate(form);
+    } else if (form.id === "contractReviewForm") {
+      await handleContractReview(form);
     } else if (form.id === "theoryBookingForm") {
       await handleTheoryBooking(form);
     } else if (form.id === "theoryExamForm") {
@@ -2564,6 +3270,14 @@ app.addEventListener("submit", async (event) => {
 });
 
 app.addEventListener("click", async (event) => {
+  const menuAction = event.target.closest("[data-menu-action]");
+  if (menuAction) {
+    if (menuAction.dataset.menuAction === "logout") {
+      await logout();
+    }
+    return;
+  }
+
   const contextAction = event.target.closest("[data-context-action]");
   if (contextAction) {
     await handleContextMenuAction(contextAction.dataset.contextAction);
@@ -2597,6 +3311,11 @@ app.addEventListener("click", async (event) => {
 
   const modalOpenButton = event.target.closest("[data-open-modal]");
   if (modalOpenButton) {
+    if (!canUseStudentActions()) {
+      setMessage("error", "Keine Berechtigung für diese Funktion.");
+      render();
+      return;
+    }
     state.modal = modalOpenButton.dataset.openModal;
     render();
     return;
@@ -2604,6 +3323,11 @@ app.addEventListener("click", async (event) => {
 
   const pilotButton = event.target.closest("[data-select-pilot]");
   if (pilotButton) {
+    if (!canUseStudentActions()) {
+      setMessage("error", "Keine Berechtigung für diese Funktion.");
+      render();
+      return;
+    }
     const pilot = pilotById(pilotButton.dataset.selectPilot);
     if (pilot?.available) {
       state.practiceSelection.pilotId = pilot.id;
@@ -2615,6 +3339,11 @@ app.addEventListener("click", async (event) => {
 
   const aircraftButton = event.target.closest("[data-select-aircraft]");
   if (aircraftButton) {
+    if (!canUseStudentActions()) {
+      setMessage("error", "Keine Berechtigung für diese Funktion.");
+      render();
+      return;
+    }
     const aircraft = aircraftById(aircraftButton.dataset.selectAircraft);
     if (aircraft?.available) {
       state.practiceSelection.aircraftId = aircraft.id;
@@ -2633,8 +3362,7 @@ app.addEventListener("click", async (event) => {
 
   const tab = event.target.closest("[data-tab]");
   if (tab) {
-    state.view = tab.dataset.tab;
-    setMessage("notice", "");
+    navigateToView(tab.dataset.tab);
     render();
     return;
   }
@@ -2647,6 +3375,11 @@ app.addEventListener("click", async (event) => {
 
   const deleteStudentButton = event.target.closest("[data-delete-student]");
   if (deleteStudentButton) {
+    if (!canUseManagementActions()) {
+      setMessage("error", "Keine Berechtigung für diese Funktion.");
+      render();
+      return;
+    }
     const id = deleteStudentButton.dataset.deleteStudent;
     const student = state.students.find((entry) => entry.id === id);
     const name = student ? studentFullName(student) : id;
@@ -2665,20 +3398,64 @@ app.addEventListener("click", async (event) => {
 
   const cancelButton = event.target.closest("[data-cancel-flight]");
   if (cancelButton) {
+    if (!canUseStudentActions()) {
+      setMessage("error", "Keine Berechtigung für diese Funktion.");
+      render();
+      return;
+    }
     await cancelFlight(cancelButton.dataset.cancelFlight);
     return;
   }
 
   const cancelCourseButton = event.target.closest("[data-cancel-course]");
   if (cancelCourseButton) {
+    if (!canUseStudentActions()) {
+      setMessage("error", "Keine Berechtigung für diese Funktion.");
+      render();
+      return;
+    }
     await cancelCourse(cancelCourseButton.dataset.cancelCourse);
     return;
   }
 
-  if (event.target.closest("#completeTrainingButton")) {
+  if (event.target.closest("#requestCompletionButton")) {
     await runAction(
-      () => api(`/ausbildung/${encodeURIComponent(ensureStudentId())}/abschliessen`, { method: "POST", body: {} }),
-      "Ausbildung wurde abgeschlossen."
+      () => api("/abschluss/anfragen", { method: "POST", body: {} }),
+      "Abschlussanfrage wurde gestellt."
+    );
+    return;
+  }
+
+  const confirmCompletionButton = event.target.closest("[data-confirm-completion-request]");
+  if (confirmCompletionButton) {
+    if (!canUseManagementActions()) {
+      setMessage("error", "Keine Berechtigung für diese Funktion.");
+      render();
+      return;
+    }
+    const id = confirmCompletionButton.dataset.confirmCompletionRequest;
+    await runAction(
+      () => api(`/verwaltung/abschlussanfragen/${encodeURIComponent(id)}/bestaetigen`, { method: "POST", body: {} }),
+      "Abschlussanfrage wurde bestätigt."
+    );
+    return;
+  }
+
+  const rejectCompletionButton = event.target.closest("[data-reject-completion-request]");
+  if (rejectCompletionButton) {
+    if (!canUseManagementActions()) {
+      setMessage("error", "Keine Berechtigung für diese Funktion.");
+      render();
+      return;
+    }
+    const id = rejectCompletionButton.dataset.rejectCompletionRequest;
+    const begruendung = window.prompt("Begründung für die Ablehnung:", "Abnahmekriterien nicht erfüllt.");
+    if (begruendung === null) {
+      return;
+    }
+    await runAction(
+      () => api(`/verwaltung/abschlussanfragen/${encodeURIComponent(id)}/ablehnen`, { method: "POST", body: { begruendung } }),
+      "Abschlussanfrage wurde abgelehnt."
     );
     return;
   }
@@ -2688,9 +3465,6 @@ app.addEventListener("click", async (event) => {
     return;
   }
 
-  if (event.target.closest("#logoutButton")) {
-    await logout();
-  }
 });
 
 app.addEventListener("dragstart", (event) => {
@@ -2843,10 +3617,20 @@ async function init() {
   render();
   try {
     const user = await api("/auth/me");
+    state.username = user.username || state.username || "";
     state.displayName = user.displayName || user.username || state.displayName || "demo";
+    state.role = user.role || state.role || "";
+    state.schuelerId = user.schuelerId || state.schuelerId || "";
+    if (state.role === "SCHUELER" && state.schuelerId) {
+      state.selectedStudentId = state.schuelerId;
+    }
+    localStorage.setItem(STORAGE.username, state.username);
     localStorage.setItem(STORAGE.displayName, state.displayName);
+    localStorage.setItem(STORAGE.role, state.role);
+    localStorage.setItem(STORAGE.schuelerId, state.schuelerId);
     await loadStudents();
     await loadSelectedStudentData();
+    await loadAbschlussData();
     state.error = "";
   } catch (error) {
     clearAuth("Bitte anmelden.");

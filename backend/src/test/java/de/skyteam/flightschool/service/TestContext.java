@@ -2,6 +2,7 @@ package de.skyteam.flightschool.service;
 
 import de.skyteam.flightschool.repository.AusbildungsStatusRepository;
 import de.skyteam.flightschool.repository.AusbildungsVertragRepository;
+import de.skyteam.flightschool.repository.AbschlussAnfrageRepository;
 import de.skyteam.flightschool.repository.FlugRepository;
 import de.skyteam.flightschool.repository.FlugzeugRepository;
 import de.skyteam.flightschool.repository.KursRepository;
@@ -10,6 +11,7 @@ import de.skyteam.flightschool.repository.PruefungRepository;
 import de.skyteam.flightschool.repository.SchuelerRepository;
 import de.skyteam.flightschool.repository.WartungRepository;
 import de.skyteam.flightschool.repository.memory.DevFlightSchoolData;
+import de.skyteam.flightschool.repository.memory.InMemoryAbschlussAnfrageRepository;
 import de.skyteam.flightschool.repository.memory.InMemoryAusbildungsStatusRepository;
 import de.skyteam.flightschool.repository.memory.InMemoryAusbildungsVertragRepository;
 import de.skyteam.flightschool.repository.memory.InMemoryFlugRepository;
@@ -34,11 +36,13 @@ final class TestContext implements AutoCloseable {
     final FlugzeugRepository flugzeugRepository;
     final WartungRepository wartungRepository;
     final AusbildungsStatusRepository ausbildungsStatusRepository;
+    final AbschlussAnfrageRepository abschlussAnfrageRepository;
     final SchuelerService schuelerService;
     final TheorieService theorieService;
     final PraxisService praxisService;
     final PruefungsService pruefungsService;
     final AusbildungsstatusService ausbildungsstatusService;
+    final AbschlussService abschlussService;
     private final Path dataFile;
 
     private TestContext(Path dataFile, DevFlightSchoolData data) {
@@ -52,6 +56,7 @@ final class TestContext implements AutoCloseable {
         this.flugzeugRepository = new InMemoryFlugzeugRepository(data);
         this.wartungRepository = new InMemoryWartungRepository(data);
         this.ausbildungsStatusRepository = new InMemoryAusbildungsStatusRepository(data);
+        this.abschlussAnfrageRepository = new InMemoryAbschlussAnfrageRepository(data);
         this.schuelerService = new SchuelerService(schuelerRepository, ausbildungsVertragRepository);
         this.theorieService = new TheorieService(schuelerRepository, kursRepository);
         this.praxisService = new PraxisService(
@@ -71,6 +76,11 @@ final class TestContext implements AutoCloseable {
                 schuelerRepository,
                 ausbildungsStatusRepository,
                 ausbildungsVertragRepository
+        );
+        this.abschlussService = new AbschlussService(
+                abschlussAnfrageRepository,
+                schuelerRepository,
+                ausbildungsstatusService
         );
     }
 

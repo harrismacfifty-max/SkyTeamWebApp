@@ -42,6 +42,7 @@ Statuscodes:
 - `201` Ressource angelegt
 - `400` Validierungsfehler
 - `401` Login fehlt
+- `403` falsche Rolle
 - `404` Entitaet oder Endpoint nicht gefunden
 - `409` fachlicher Konflikt
 - `500` unerwarteter Fehler
@@ -61,6 +62,13 @@ CORS ist fuer lokale Frontends aktiviert.
 }
 ```
 
+Demo-Zugaenge:
+
+```text
+demo/demo    -> SCHUELER
+demo2/demo2  -> SCHUELERVERWALTUNG
+```
+
 Antwort:
 
 ```json
@@ -69,9 +77,37 @@ Antwort:
   "message": "Login erfolgreich.",
   "data": {
     "token": "session-...",
-    "displayName": "demo"
+    "username": "demo",
+    "displayName": "Demo Schüler",
+    "role": "SCHUELER",
+    "schuelerId": "SC901"
   },
   "errors": []
+}
+```
+
+`GET /api/auth/me` liefert:
+
+```json
+{
+  "authenticated": true,
+  "username": "demo2",
+  "displayName": "Demo Schülerverwaltung",
+  "role": "SCHUELERVERWALTUNG",
+  "schuelerId": ""
+}
+```
+
+Bei falscher Rolle:
+
+```json
+{
+  "success": false,
+  "message": "Keine Berechtigung für diese Funktion.",
+  "data": null,
+  "errors": [
+    "Keine Berechtigung für diese Funktion."
+  ]
 }
 ```
 
@@ -83,11 +119,72 @@ Alle folgenden Endpunkte ausser `GET /api/health`, `GET /api/version` und `POST 
 Authorization: Bearer <token-aus-login>
 ```
 
+## Rollen
+
+`SCHUELER` darf eigene Ausbildungsdaten lesen, Theorie/Praxis buchen, Prüfungen anmelden und eine Abschlussanfrage stellen.
+
+`SCHUELERVERWALTUNG` darf Schülerdaten prüfen/anlegen/löschen, Vertrags- und Statusdaten prüfen, Prüfungsergebnisse speichern, Abschlussanfragen lesen sowie Abschlüsse bestätigen oder ablehnen.
+
+Schreibende Aktionen werden serverseitig geprüft; verbotene Aktionen liefern `403`. Schüleraktionen sind immer auf den eigenen Datensatz beschränkt. `demo/demo` ist im Demo-Modus fest `SC901` zugeordnet und darf keine Theorie-, Praxis- oder Prüfungsanmeldung für andere Schüler auslösen.
+
+Theorie-, Praxis- und Prüfungsanmeldungen sind ausschließlich Schülerfunktionen:
+
+- `POST /api/theorie/buchen`
+- `POST /api/praxis/buchen`
+- `POST /api/pruefung/theorie/anmelden`
+- `POST /api/pruefung/praxis/anmelden`
+
+`SCHUELERVERWALTUNG` erhält für diese Endpunkte `403`. Prüfungsergebnisse bleiben eine Verwaltungsfunktion; `SCHUELER` erhält für `POST /api/pruefung/ergebnis` ebenfalls `403`.
+
+## Verwaltung
+
+Alle Endpunkte unter `/api/verwaltung/**` erfordern die Rolle `SCHUELERVERWALTUNG`. Ein Login mit `demo/demo` erhaelt fuer diese Endpunkte `403`.
+
+- `GET /api/verwaltung/schueler`
+- `GET /api/verwaltung/schueler/{id}`
+- `POST /api/verwaltung/schueler`
+- `GET /api/verwaltung/schueler/{id}/vertrag`
+- `POST /api/verwaltung/schueler/{id}/vertrag/pruefen`
+
+`POST /api/verwaltung/schueler` legt einen Schueler an und erzeugt bei fehlender Vertrags-ID automatisch einen Demo-Ausbildungsvertrag:
+
+```json
+{
+  "vorname": "Alex",
+  "name": "Muster",
+  "startzeit": "2026-06-20",
+  "theorieStunden": 0,
+  "flugStunden": 0,
+  "vertragsStatus": "Unterschrieben",
+  "notiz": "Manuell angelegter Demo-Schueler"
+}
+```
+
+`POST /api/verwaltung/schueler/{id}/vertrag/pruefen` dokumentiert die Vertragspruefung im vorhandenen Vertragsfeld `NOTIZ`:
+
+```json
+{
+  "pruefer": "Demo Schuelerverwaltung",
+  "bemerkung": "Vertrag fachlich geprueft"
+}
+```
+
+Antwort:
+
+```json
+{
+  "id": "AV901",
+  "schuleId": "S001",
+  "status": "Unterschrieben",
+  "notiz": "Vertrag geprueft durch Demo Schuelerverwaltung: Vertrag fachlich geprueft",
+  "geprueft": true
+}
+```
+
 ## Allgemein
 
 - `GET /api/health`
 - `GET /api/schueler`
-- `POST /api/schueler`
 - `GET /api/schueler/{id}`
 - `DELETE /api/schueler/{id}`
 - `GET /api/status/{schuelerId}`
@@ -101,7 +198,9 @@ $headers = @{ Authorization = "Bearer $($login.data.token)" }
 Invoke-RestMethod http://localhost:8080/api/schueler/SC901 -Headers $headers
 ```
 
-`POST /api/schueler`:
+Schueleranlage fuer die Verwaltung erfolgt fachlich ueber `POST /api/verwaltung/schueler`. Der alte Pfad `POST /api/schueler` bleibt als Kompatibilitaetsroute erhalten.
+
+Request:
 
 ```json
 {
@@ -255,9 +354,44 @@ Nicht bestandene Pruefungen werden als Wiederholungsbedarf markiert.
 
 ## Abschluss
 
-`POST /api/ausbildung/{schuelerId}/abschliessen`
+- `GET /api/abschluss/meine-anfrage`
+- `POST /api/abschluss/anfragen`
+- `GET /api/verwaltung/abschlussanfragen`
+- `GET /api/verwaltung/abschlussanfragen/alle`
+- `GET /api/verwaltung/abschlussanfragen/{id}`
+- `POST /api/verwaltung/abschlussanfragen/{id}/bestaetigen`
+- `POST /api/verwaltung/abschlussanfragen/{id}/ablehnen`
 
-Die Ausbildung kann nur abgeschlossen werden, wenn Theorie- und Praxispruefung bestanden sind. Andernfalls liefert die API `409`.
+`SCHUELER` stellt die Abschlussanfrage fuer den eigenen Datensatz und sieht den eigenen Anfragezustand. `SCHUELERVERWALTUNG` liest nur vorhandene offene Abschlussanfragen und bestaetigt oder lehnt sie ab. Die Bestaetigung ist nur moeglich, wenn eine Anfrage vorhanden ist und Theorie- sowie Praxis-Abnahmekriterien erfuellt sind. Andernfalls liefert die API `409`. Bei falscher Rolle liefert die API `403`.
+
+Beispiel Abschlussanfrage:
+
+```json
+{
+  "success": true,
+  "message": "Abschlussanfrage gestellt.",
+  "data": {
+    "id": "AA907",
+    "schuelerId": "SC906",
+    "status": "ANGEFRAGT",
+    "begruendung": "",
+    "angefragtAm": "2026-06-22T10:15:00",
+    "geprueftAm": null,
+    "theorieKriterienErfuellt": true,
+    "praxisKriterienErfuellt": true,
+    "bestaetigungMoeglich": true
+  },
+  "errors": []
+}
+```
+
+Beispiel Ablehnung:
+
+```json
+{
+  "begruendung": "Abnahmekriterien nicht erfuellt."
+}
+```
 
 ## Curl-Beispiele
 

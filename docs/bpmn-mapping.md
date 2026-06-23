@@ -1,57 +1,57 @@
 # BPMN-Mapping
 
-Die BPMN-Logik wird im MVP nicht mit einer BPMN-Rendering-Library visualisiert. Stattdessen zeigt das Dashboard eine HTML/CSS-Schrittleiste mit den Zustaenden `offen`, `aktiv`, `erledigt` und `blockiert`.
+Dieses Mapping bezieht sich auf die aktualisierte Datei `Ausbildungsverwaltung.bpmn`. Die WebApp rendert das BPMN nicht direkt, sondern zeigt die fachlichen Lanes im Dashboard als HTML/CSS-Schrittleiste mit den Zuständen `offen`, `aktiv`, `erledigt` und `blockiert`.
 
-Statusquelle:
+Statusquellen:
 
 ```text
 GET /api/status/{schuelerId}/gesamt
+GET /api/abschluss/meine-anfrage
+GET /api/verwaltung/abschlussanfragen
 ```
 
-## Ausbildungsverwaltung
+Die BPMN-Datei enthält drei Lanes:
 
-| BPMN-Schritt | UI-Funktion | API-Endpunkt | Service | Tabelle / Repository |
-| --- | --- | --- | --- | --- |
-| Ausbildungsanfrage / Ausbildung starten | Schueleransicht, Schueler anlegen | `POST /api/schueler` | `SchuelerService` | `SCHUELER`, `AUSBILDUNG_VERTRAG` / `SchuelerRepository`, `AusbildungsVertragRepository` |
-| Schuelerdaten pruefen | Schuelerliste und Detaildaten | `GET /api/schueler/{id}` | `SchuelerService` | `SCHUELER` / `SchuelerRepository` |
-| Ausbildungsvertrag pruefen | Dashboard, Abschlussansicht | `GET /api/status/{id}/gesamt` | `AusbildungsstatusService` | `AUSBILDUNG_VERTRAG` / `AusbildungsStatusRepository` |
-| Ausbildungsplan anlegen | Dashboard, Theorie-/Praxisdaten sichtbar | `GET /api/theorie/{id}`, `GET /api/praxis/{id}` | `TheorieService`, `PraxisService` | `KURSE`, `FLUG` / `KursRepository`, `FlugRepository` |
-| Ausbildungsabschluss dokumentieren | Tab Abschluss, Button `Ausbildung abschliessen` | `POST /api/ausbildung/{id}/abschliessen` | `AusbildungsstatusService` | `AUSBILDUNG_VERTRAG` / `AusbildungsVertragRepository` |
+- `Ausbilder`
+- `Schülerverwaltung`
+- `Prüfungsverwaltung`
 
-## Theorieausbildung
+Die WebApp kennt zwei Loginrollen: `SCHUELER` für den eigenen Ausbildungsprozess und `SCHUELERVERWALTUNG` für Verwaltungsfunktionen. Die BPMN-Lane `Prüfungsverwaltung` ist im MVP ein fachlicher Bereich der Schülerverwaltung, nicht ein separater Login.
 
-| BPMN-Schritt | UI-Funktion | API-Endpunkt | Service | Tabelle / Repository |
-| --- | --- | --- | --- | --- |
-| Theoriekurs buchen | Tab Theorie, Formular `Neuer Theoriekurs` | `POST /api/theorie/buchen` | `TheorieService` | `KURSE`, `SCHUELER` / `KursRepository` |
-| Theoriekurs durchfuehren | Kurs erscheint in Theorietabelle | `GET /api/theorie/{id}` | `TheorieService` | `KURSE` / `KursRepository` |
-| Theoriestunden erfassen | Fortschrittskarte Theorie | `GET /api/status/{id}/theorie` | `TheorieService` | `SCHUELER.THEORIESTUNDE` / `KursRepository` |
-| Restliche Theoriestunden pruefen | Dashboard-Prozessanzeige | `GET /api/status/{id}/gesamt` | `AusbildungsstatusService` | `SCHUELER` / `AusbildungsStatusRepository` |
-| Theoriepruefung durchfuehren | Button `Theoriepruefung anmelden` | `POST /api/pruefung/theorie/anmelden` | `PruefungsService` | `PRUEFUNG` / `PruefungRepository` |
-| Theorieergebnis speichern | Tab Pruefungen, Ergebnisformular | `POST /api/pruefung/ergebnis` | `PruefungsService` | `PRUEFUNG` / `PruefungRepository` |
-| Theorie wiederholen oder abschliessen | Prozessanzeige und Pruefungsstatus | `GET /api/status/{id}/gesamt` | `AusbildungsstatusService`, `PruefungsService` | `PRUEFUNG` / `PruefungRepository` |
+## Mapping-Tabelle
 
-## Praxisausbildung
+| BPMN-Lane | BPMN-Aktivität | Rolle in der WebApp | UI-Bereich | API-Endpunkt | Service | Repository/Tabelle | Status im MVP |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Ausbilder | Anmeldung (Webapp) | Schüler oder Schülerverwaltung | Login-Ansicht, Header-Loginstatus | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout` | `AuthService` | In-Memory-Session, keine DB-Tabelle | Umgesetzt; `demo/demo` = `SCHUELER`, `demo2/demo2` = `SCHUELERVERWALTUNG` |
+| Schülerverwaltung | Schülerdaten prüfen | Schülerverwaltung | Menü `Selbstverwaltung`, Bereich `Schülerdaten prüfen` | `GET /api/verwaltung/schueler`, `GET /api/verwaltung/schueler/{id}` | `SchuelerService` | `SchuelerRepository` / `SCHUELER` | Umgesetzt; Suche, Filter und Detailansicht vorhanden |
+| Schülerverwaltung | Ausbildungsvertrag prüfen | Schülerverwaltung | Menü `Selbstverwaltung`, Bereich `Ausbildungsvertrag prüfen` | `GET /api/verwaltung/schueler/{id}/vertrag`, `POST /api/verwaltung/schueler/{id}/vertrag/pruefen` | `SchuelerService`, `AusbildungsstatusService` | `AusbildungsVertragRepository` / `AUSBILDUNG_VERTRAG` | Umgesetzt; Prüfung kann im Demo-Modus dokumentiert werden |
+| Schülerverwaltung | Schüler anlegen | Schülerverwaltung | Menü `Selbstverwaltung`, Unterpunkt `Schüler anlegen` | `POST /api/verwaltung/schueler` | `SchuelerService` | `SchuelerRepository`, `AusbildungsVertragRepository` / `SCHUELER`, `AUSBILDUNG_VERTRAG` | Umgesetzt im Demo-Modus mit Persistenz; Oracle-Repository vorbereitet |
+| Schülerverwaltung | Abbruch | Schülerverwaltung | Dashboard-Prozessanzeige, Statusanzeige | `GET /api/status/{schuelerId}/gesamt` | `AusbildungsstatusService` | `AUSBILDUNG_VERTRAG` | Teilweise umgesetzt; Status `ABGEBROCHEN` wird angezeigt, separate Abbruch-Aktion ist offen |
+| Schülerverwaltung | Schüler erfolgreich angelegt | Schülerverwaltung | Dashboard-Prozessanzeige, Schülerliste | `GET /api/verwaltung/schueler/{id}`, `GET /api/status/{schuelerId}/gesamt` | `SchuelerService`, `AusbildungsstatusService` | `SCHUELER`, `AUSBILDUNG_VERTRAG` | Umgesetzt; vorhandener Schüler mit Vertrag gilt als erfolgreich angelegt |
+| Prüfungsverwaltung | Beantragung des Schülers vorhanden? | Schüler, Schülerverwaltung | Menü `Abschluss anfragen` bzw. `Abschlussanfragen prüfen`, Dashboard-Prozessanzeige | `POST /api/abschluss/anfragen`, `GET /api/abschluss/meine-anfrage`, `GET /api/verwaltung/abschlussanfragen` | `AbschlussService` | `AbschlussAnfrageRepository` / optional `ABSCHLUSS_ANFRAGE` | Umgesetzt als echte Abschlussanfrage; Demo-Modus persistiert Anfragen im In-Memory-Speicher |
+| Prüfungsverwaltung | Nein | Schülerverwaltung | Dashboard-Prozessanzeige, Verwaltungsliste | `GET /api/verwaltung/abschlussanfragen` | `AbschlussService` | `AbschlussAnfrageRepository` / optional `ABSCHLUSS_ANFRAGE` | Umgesetzt; ohne vorhandene Anfrage gibt es keinen bestätigbaren Verwaltungseintrag |
+| Prüfungsverwaltung | Abnahmekriterien Theorie überprüfen | Schülerverwaltung | Dashboard, Abschlussanfragen prüfen | `GET /api/verwaltung/abschlussanfragen/{id}` | `AbschlussService`, `AusbildungsstatusService`, `PruefungsService` | `PruefungRepository`, `KursRepository` / `PRUEFUNG`, `KURSE` | Umgesetzt; Kriterium ist bestandene Theorieprüfung |
+| Prüfungsverwaltung | Abnahmekriterien Praxis überprüfen | Schülerverwaltung | Dashboard, Abschlussanfragen prüfen | `GET /api/verwaltung/abschlussanfragen/{id}` | `AbschlussService`, `AusbildungsstatusService`, `PruefungsService` | `PruefungRepository`, `FlugRepository` / `PRUEFUNG`, `FLUG` | Umgesetzt; Kriterium ist bestandene Praxisprüfung |
+| Prüfungsverwaltung | Schüler Abschluss bestätigen | Schülerverwaltung | Menü `Abschlussanfragen prüfen`, Button `Bestätigen` | `POST /api/verwaltung/abschlussanfragen/{id}/bestaetigen` | `AbschlussService`, `AusbildungsstatusService` | `AbschlussAnfrageRepository`, `AusbildungsVertragRepository` / optional `ABSCHLUSS_ANFRAGE`, `AUSBILDUNG_VERTRAG` | Umgesetzt; nur mit vorhandener Anfrage und erfüllten Abnahmekriterien möglich |
+| Prüfungsverwaltung | Bestätigt | Schülerverwaltung | Dashboard, Abschlussansicht | `GET /api/status/{schuelerId}/gesamt`, `GET /api/verwaltung/abschlussanfragen/{id}` | `AbschlussService`, `AusbildungsstatusService` | `ABSCHLUSS_ANFRAGE`, `AUSBILDUNG_VERTRAG` | Umgesetzt; Anfrage wird `ABGESCHLOSSEN`, Ausbildungsvertrag wird `ABGESCHLOSSEN` |
 
-| BPMN-Schritt | UI-Funktion | API-Endpunkt | Service | Tabelle / Repository |
-| --- | --- | --- | --- | --- |
-| Neue Flugstunde buchen | Tab Praxis, Formular `Neue Flugstunde` | `POST /api/praxis/buchen` | `PraxisService` | `FLUG` / `FlugRepository` |
-| Fluglehrer pruefen | Validierung bei Praxisbuchung | `POST /api/praxis/buchen` | `PraxisService` | `PILOT` / `PilotRepository` |
-| Flugzeug pruefen | Validierung bei Praxisbuchung | `POST /api/praxis/buchen` | `PraxisService` | `FLUGZEUG` / `FlugzeugRepository` |
-| Wartungsstatus pruefen | Validierung bei Praxisbuchung | `POST /api/praxis/buchen` | `PraxisService` | `WARTUNG`, `WARTUNG_UND_FLUGZEUG` / `WartungRepository` |
-| Check-in durchfuehren | Im MVP als Teil der gebuchten Flugstunde abgebildet | `GET /api/praxis/{id}` | `PraxisService` | `FLUG` / `FlugRepository` |
-| Ausbildungsflug durchfuehren | Flugstunde in Praxistabelle | `GET /api/praxis/{id}` | `PraxisService` | `FLUG` / `FlugRepository` |
-| Flugstunden erfassen | Fortschrittskarte Praxis | `GET /api/status/{id}/praxis` | `PraxisService` | `SCHUELER.FLUGSTUNDE` / `FlugRepository` |
-| Praxispruefung durchfuehren | Button `Praxispruefung anmelden` | `POST /api/pruefung/praxis/anmelden` | `PruefungsService` | `PRUEFUNG` / `PruefungRepository` |
-| Praxisergebnis speichern | Tab Pruefungen, Ergebnisformular | `POST /api/pruefung/ergebnis` | `PruefungsService` | `PRUEFUNG` / `PruefungRepository` |
-| Praxis wiederholen oder abschliessen | Prozessanzeige und Abschlussstatus | `GET /api/status/{id}/gesamt` | `AusbildungsstatusService`, `PruefungsService` | `PRUEFUNG`, `AUSBILDUNG_VERTRAG` |
+## UI- und Menübezug
+
+- Dashboard: zeigt die drei BPMN-Lanes `Ausbilder`, `Schülerverwaltung` und `Prüfungsverwaltung`.
+- Schülerrolle: sieht `Main Menu / Dashboard`, `Theorie anmelden`, `Praxis anmelden`, `Prüfung anmelden`, `Abschluss anfragen`.
+- Schülerverwaltung: sieht `Main Menu / Dashboard`, `Selbstverwaltung`, `Schüler anlegen`, `Schülerdaten prüfen`, `Ausbildungsvertrag prüfen`, `Abschlussanfragen prüfen`.
+- Menüpunkt `Abschluss anfragen`: Schüler stellt die eigene Anfrage und sieht Statuswerte wie `KEINE_ANFRAGE`, `ANGEFRAGT`, `ABGELEHNT` oder `ABGESCHLOSSEN`.
+- Menüpunkt `Abschlussanfragen prüfen`: Schülerverwaltung sieht nur vorhandene offene Anfragen, prüft Abnahmekriterien und bestätigt oder lehnt ab.
+- Menüpunkte `Theorie anmelden`, `Praxis anmelden` und `Prüfung anmelden`: sind Schülerfunktionen und keine eigenen Lanes im aktualisierten BPMN.
+- Die Planungsansicht bleibt eine unterstützende Demo-Komfortfunktion und ist nicht Teil der aktualisierten BPMN-Lanes.
 
 ## Statusableitung
 
 | UI-Zustand | Ableitung |
 | --- | --- |
-| `offen` | Schritt ist noch nicht erreicht. |
-| `aktiv` | Mindestdaten liegen vor, der naechste Prozessschritt ist ausfuehrbar. |
-| `erledigt` | Status oder Ergebnis ist erfolgreich vorhanden. |
-| `blockiert` | Fachregel verhindert Fortsetzung, z.B. fehlende Mindeststunden oder nicht bestandene Pruefung. |
+| `offen` | Schritt ist im aktuellen Schülerkontext noch nicht erreicht. |
+| `aktiv` | Der Schritt ist der nächste sinnvolle Schritt im BPMN-Ablauf. |
+| `erledigt` | Status, Datensatz oder Ergebnis ist erfolgreich vorhanden. |
+| `blockiert` | Fachregel verhindert Fortsetzung, z.B. fehlende Abschlussanfrage oder nicht erfüllte Abnahmekriterien. |
 
-Der Abschluss wird erst als erledigt markiert, wenn der Gesamtstatus `ABGESCHLOSSEN` ist. Bestandene Theorie und Praxis allein bedeuten nur: Abschluss ist ausfuehrbar.
+Der Abschluss wird erst als `Bestätigt` markiert, wenn eine Abschlussanfrage vorhanden ist, Theorie- und Praxis-Abnahmekriterien erfüllt sind und die Schülerverwaltung bestätigt hat. Bestandene Theorie und Praxis allein schließen die Ausbildung nicht mehr direkt ab.

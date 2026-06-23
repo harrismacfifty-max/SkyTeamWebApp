@@ -88,6 +88,38 @@ public final class SchuelerService {
         }
     }
 
+    public AusbildungsVertrag findVertragBySchuelerId(String id) {
+        findById(id);
+        return ausbildungsVertragRepository.findBySchuelerId(id)
+                .orElseThrow(() -> new NotFoundException("Ausbildungsvertrag wurde nicht gefunden."));
+    }
+
+    public AusbildungsVertrag pruefeVertrag(String schuelerId, Map<String, String> body) {
+        AusbildungsVertrag current = findVertragBySchuelerId(schuelerId);
+        String pruefer = optional(body, "pruefer", "Schuelerverwaltung");
+        String bemerkung = optional(body, "bemerkung", "Vertrag fachlich geprueft");
+        String marker = "Vertrag geprueft durch " + pruefer + ": " + bemerkung;
+        String notiz = appendMarker(current.notiz(), marker);
+        return ausbildungsVertragRepository.save(new AusbildungsVertrag(
+                current.id(),
+                current.schuleId(),
+                current.startzeit(),
+                current.endzeit(),
+                current.status(),
+                notiz
+        ));
+    }
+
+    private static String appendMarker(String current, String marker) {
+        if (current == null || current.isBlank()) {
+            return marker;
+        }
+        if (current.contains(marker)) {
+            return current;
+        }
+        return current + " | " + marker;
+    }
+
     private static String required(Map<String, String> body, String field) {
         if (body == null) {
             throw new ValidationException(field + " ist erforderlich.");

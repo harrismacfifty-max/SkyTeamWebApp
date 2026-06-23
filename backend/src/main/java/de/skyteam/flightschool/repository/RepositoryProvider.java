@@ -1,6 +1,7 @@
 package de.skyteam.flightschool.repository;
 
 import de.skyteam.flightschool.repository.jdbc.JdbcAircraftRepository;
+import de.skyteam.flightschool.repository.jdbc.JdbcAbschlussAnfrageRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcAusbildungsStatusRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcAusbildungsVertragRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcConnectionFactory;
@@ -14,6 +15,7 @@ import de.skyteam.flightschool.repository.jdbc.JdbcSchuelerRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcStudentRepository;
 import de.skyteam.flightschool.repository.jdbc.JdbcWartungRepository;
 import de.skyteam.flightschool.repository.memory.DevFlightSchoolData;
+import de.skyteam.flightschool.repository.memory.InMemoryAbschlussAnfrageRepository;
 import de.skyteam.flightschool.repository.memory.InMemoryAircraftRepository;
 import de.skyteam.flightschool.repository.memory.InMemoryAusbildungsStatusRepository;
 import de.skyteam.flightschool.repository.memory.InMemoryAusbildungsVertragRepository;
@@ -42,7 +44,8 @@ public record RepositoryProvider(
         PilotRepository piloten,
         FlugzeugRepository flugzeuge,
         WartungRepository wartungen,
-        AusbildungsStatusRepository ausbildungsStatus
+        AusbildungsStatusRepository ausbildungsStatus,
+        AbschlussAnfrageRepository abschlussAnfragen
 ) {
     @FunctionalInterface
     public interface DatabaseHealthCheck {
@@ -68,7 +71,8 @@ public record RepositoryProvider(
                     new JdbcPilotRepository(connections),
                     new JdbcFlugzeugRepository(connections),
                     new JdbcWartungRepository(connections),
-                    new JdbcAusbildungsStatusRepository(connections)
+                    new JdbcAusbildungsStatusRepository(connections),
+                    new JdbcAbschlussAnfrageRepository(connections)
             );
         }
         if (!"dev".equalsIgnoreCase(profile) && !"demo".equalsIgnoreCase(profile)) {
@@ -90,7 +94,8 @@ public record RepositoryProvider(
                 new InMemoryPilotRepository(data),
                 new InMemoryFlugzeugRepository(data),
                 new InMemoryWartungRepository(data),
-                new InMemoryAusbildungsStatusRepository(data)
+                new InMemoryAusbildungsStatusRepository(data),
+                new InMemoryAbschlussAnfrageRepository(data)
         );
     }
 

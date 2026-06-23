@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpServer;
 import de.skyteam.flightschool.api.ApiHandler;
 import de.skyteam.flightschool.config.ApplicationConfig;
 import de.skyteam.flightschool.repository.RepositoryProvider;
+import de.skyteam.flightschool.service.AbschlussService;
 import de.skyteam.flightschool.service.AircraftService;
 import de.skyteam.flightschool.service.AuthService;
 import de.skyteam.flightschool.service.AusbildungsstatusService;
@@ -70,6 +71,11 @@ public final class FlightSchoolApplication {
                 repositories.ausbildungsStatus(),
                 repositories.ausbildungsVertraege()
         );
+        AbschlussService abschlussService = new AbschlussService(
+                repositories.abschlussAnfragen(),
+                repositories.schueler(),
+                ausbildungsstatusService
+        );
 
         ApiHandler apiHandler = new ApiHandler(
                 ApplicationConfig.defaults(),
@@ -85,7 +91,8 @@ public final class FlightSchoolApplication {
                 theorieService,
                 praxisService,
                 pruefungsService,
-                ausbildungsstatusService
+                ausbildungsstatusService,
+                abschlussService
         );
 
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);

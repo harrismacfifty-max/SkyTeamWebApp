@@ -1,32 +1,29 @@
-# Demo-Skript: 5-Minuten-Vorfuehrung
+# Demo-Skript: 5-Minuten-Vorführung
 
-Ziel: Den MVP ohne Oracle-Datenbank zeigen und den Bezug zwischen UI, API, Services und BPMN-Prozess verdeutlichen.
+Ziel: Den MVP im Demo-Modus ohne Oracle zeigen und dabei klar zwischen den Rollen `Schüler` und `Schülerverwaltung` unterscheiden.
 
 ## Vorbereitung
 
-Backend und Frontend starten:
-
-Empfohlen ueber Docker Compose, auf Windows, macOS und Linux gleich:
+Empfohlener Start über Docker Compose:
 
 ```bash
 cd <projektverzeichnis>
 docker compose up --build
 ```
 
-Frontend oeffnen:
+Danach öffnen:
 
 ```text
-http://localhost:8081
+Frontend: http://localhost:8081
+Backend:  http://localhost:8080/api/health
 ```
 
-Optionaler lokaler Start ueber Windows PowerShell:
+Lokale Alternativen ohne Docker:
 
 ```powershell
 cd <projektverzeichnis>
 .\scripts\start.ps1
 ```
-
-Optionaler lokaler Start ueber macOS/Linux Terminal:
 
 ```bash
 cd <projektverzeichnis>
@@ -34,221 +31,102 @@ chmod +x scripts/start.sh
 ./scripts/start.sh
 ```
 
-Login:
+Demo-Logins:
 
 ```text
-demo / demo
+Schüler:             demo  / demo
+Schülerverwaltung:   demo2 / demo2
 ```
 
-Optionaler Reset auf Ausgangsdaten:
-
-Docker Compose:
+Optionaler Reset der Demo-Daten:
 
 ```bash
 docker compose down -v
+docker compose up --build
 ```
 
-Lokaler PowerShell-Start:
+## Teil 1: Schüler, ca. 2 Minuten
 
-```powershell
-Remove-Item .\backend\target\dev-data\flight-school-demo.properties
-```
-
-Lokaler macOS/Linux-Start:
-
-```bash
-rm -f ./backend/target/dev-data/flight-school-demo.properties
-```
-
-Danach Backend neu starten.
-
-## Minute 0-1: Einstieg
-
-1. Frontend oeffnen und einloggen.
-2. Logo oben links, aktive Tabs und Demo-Login kurz zeigen.
-3. Dashboard oeffnen.
-4. Kurz zeigen:
-   - Statusuebersicht fuer Theorie, Praxis, Pruefung und Ausbildung
-   - Schuelerauswahl
-   - Ausbildungsstatus
-   - Theorie-/Praxisfortschritt
-   - BPMN-Prozessanzeige
-5. Erklaeren: Die Prozessanzeige wird aus `GET /api/status/{schuelerId}/gesamt` abgeleitet.
-
-Empfohlener Schueler:
-
-```text
-SC901 Jonas Keller
-```
-
-## Minute 1: Schueler suchen und Komfortfunktionen zeigen
-
-1. Tab `Schueler` oeffnen.
-2. Im Suchfeld nach `Keller`, `Nico` oder einem Status filtern.
-3. Einen Schueler aus der Tabelle auswaehlen.
-4. Rechtsklick oder Drei-Punkte-Button in der Schuelerzeile zeigen.
-5. Kontextaktion `Theorie oeffnen` oder `Praxis oeffnen` auswaehlen.
-
-Technischer Bezug:
-
-```text
-GET /api/schueler
-GET /api/status/{schuelerId}/gesamt
-Frontend-Komfort: Suche, Status-Badges, Kontextmenue
-```
-
-## Optional: Planungsansicht zeigen
-
-1. Tab `Planung` oeffnen.
-2. Offene Theorieanfrage per Drag-and-Drop in `Geplante Theoriestunden` ziehen.
-3. Bestaetigung anzeigen und speichern.
-4. Geplante Theoriestunde wieder per Drag-and-Drop zurueck in `Offene Theorieanfragen` ziehen und Storno bestaetigen.
-5. Optional: Offene Praxisanfrage in `Geplante Flugstunden` ziehen.
-6. Ungueltigen Drop, z.B. Theorieanfrage auf `Pruefungen`, kurz zeigen: Die UI verhindert fachlich falsche Verschiebungen.
-
-Technischer Bezug:
-
-```text
-POST /api/theorie/buchen
-POST /api/theorie/stornieren
-POST /api/praxis/buchen
-Planungsansicht nutzt vorhandene REST-Endpunkte und bricht den normalen Buchungsprozess nicht.
-```
-
-## Demo-Fall 1: Schueler bucht Theoriekurs
-
-1. Tab `Theorie` oeffnen.
-2. Schueler `SC901` ausgewaehlt lassen.
-3. Status-Badge zeigen: Theorie offen oder bereit.
-4. Kursdaten eintragen:
-
-```text
-Thema: Theorie - Demo Navigation
-Termin: beliebiges Datum
-Dauer: 60
-Dozent: Elias Schulz
-```
-
-5. `Theoriekurs buchen` klicken.
-6. Ladehinweis und danach Tabelle/Fortschritt zeigen.
-7. Optional: Kurs ueber `Stornieren`, Kontextmenue oder Planungsboard wieder entfernen.
-
-Technischer Bezug:
-
-```text
-POST /api/theorie/buchen
-POST /api/theorie/stornieren
-TheorieService
-KursRepository
-KURSE / SCHUELER.THEORIESTUNDE
-```
-
-## Demo-Fall 2: Schueler bucht Flugstunde
-
-1. Tab `Praxis` oeffnen.
-2. Fluglehrer- und Flugzeugsuche kurz zeigen.
-3. Gueltige Daten eintragen:
+1. Mit `demo/demo` anmelden.
+2. `Main Menu / Dashboard` zeigen.
+3. Begrüßung mit eigenem Schülernamen, Ausbildungsstatus, Theorie-Fortschritt, Praxis-Fortschritt, Prüfungsstatus und Abschlussanfrage-Status zeigen.
+4. Prüfen: Verwaltungsfunktionen wie `Schüler anlegen`, `Schülerdaten prüfen`, `Ausbildungsvertrag prüfen` und `Abschlussanfragen prüfen` sind nicht sichtbar.
+5. `Theorie anmelden` öffnen und eine eigene Theoriestunde buchen.
+6. `Praxis anmelden` öffnen und eine eigene Flugstunde buchen. Geeignete Demo-Werte:
 
 ```text
 Fluglehrer: P001
 Flugzeug: FZ002
 Start/Ziel: EDDV
-Ausbildungsinhalt: Platzrunde Demo
 ```
 
-4. `Flugstunde buchen` klicken.
-5. Neue Flugstunde, aktualisierte Flugstunden und Status-Badge zeigen.
-6. Optional: Flugstunde ueber `Stornieren` oder Kontextmenue wieder entfernen.
+7. `Prüfung anmelden` öffnen. Falls beim eigenen Demo-Schüler noch Mindeststunden fehlen, die fachliche Meldung zeigen.
+8. `Abschluss anfragen` öffnen und die eigene Abschlussanfrage stellen oder den aktuellen Anfragezustand zeigen.
 
 Technischer Bezug:
 
 ```text
+POST /api/theorie/buchen
 POST /api/praxis/buchen
-PraxisService
-PilotRepository / FlugzeugRepository / WartungRepository / FlugRepository
-PILOT / FLUGZEUG / WARTUNG / FLUG
-```
-
-Optionaler Fehlerfall:
-
-```text
-Flugzeug FZ001 -> 409 wegen Wartung
-Flugzeug FZ004 -> 409 wegen gesperrtem Flugzeug
-Pilot P004 -> 409 wegen nicht verfuegbarem Fluglehrer
-```
-
-## Demo-Fall 3: Pruefung anmelden
-
-1. Schueler `SC902 Nico Berger` waehlen.
-2. Tab `Theorie` oeffnen.
-3. Zeigen: Theoriepruefung ist wegen 12 Theoriestunden freigeschaltet.
-4. Theoriepruefung anmelden.
-
-Alternativ Praxis:
-
-```text
-SC903 Mina Sommer
-```
-
-Technischer Bezug:
-
-```text
 POST /api/pruefung/theorie/anmelden
 POST /api/pruefung/praxis/anmelden
-PruefungsService
-PruefungRepository
-PRUEFUNG
+POST /api/abschluss/anfragen
+GET  /api/abschluss/meine-anfrage
 ```
 
-## Demo-Fall 4: Pruefungsergebnis speichern
+Wichtige Aussage für die Vorführung: Der Schüler kann den Abschluss nur anfragen. Wirksam wird er erst durch die Schülerverwaltung.
 
-1. Tab `Pruefungen` oeffnen.
-2. Eine Pruefung auswaehlen.
-3. Status-Badge `Angemeldet`, `Bestanden` oder `Nicht bestanden` zeigen.
-4. Ergebnis speichern:
+## Teil 2: Schülerverwaltung, ca. 3 Minuten
+
+1. Abmelden und mit `demo2/demo2` anmelden.
+2. `Main Menu / Dashboard` zeigen.
+3. Verwaltungskennzahlen zeigen: Anzahl Schüler, offene Abschlussanfragen, abgelehnte und bestätigte Abschlussanfragen.
+4. BPMN-Prozesspunkte im Verwaltungsdashboard zeigen:
 
 ```text
-Pruefungsart: Theorie oder Praxis
-Ergebnis: bestanden oder nicht bestanden
+Schülerdaten prüfen
+Ausbildungsvertrag prüfen
+Schüler anlegen
+Beantragung des Schülers vorhanden?
+Abnahmekriterien Theorie überprüfen
+Abnahmekriterien Praxis überprüfen
+Schüler Abschluss bestätigen
 ```
 
-5. Bei `nicht bestanden` zeigen: Wiederholungsbedarf wird markiert.
+5. `Selbstverwaltung` öffnen.
+6. `Schüler anlegen` öffnen und einen Demo-Schüler anlegen.
+7. `Schülerdaten prüfen` öffnen, nach einem Schüler suchen und Details anzeigen.
+8. `Ausbildungsvertrag prüfen` öffnen und einen Vertrag als geprüft markieren.
+9. `Abschlussanfragen prüfen` öffnen.
+10. Demo-Anfrage `AA906` für `SC906 Oskar Lange` öffnen.
+11. Theorie- und Praxis-Abnahmekriterien zeigen.
+12. `Bestätigen` klicken und damit den BPMN-Schritt `Schüler Abschluss bestätigen` ausführen.
+13. Prüfen: Theorie-, Praxis- und Prüfungsanmeldung sind für `demo2/demo2` nicht sichtbar.
 
 Technischer Bezug:
 
 ```text
-POST /api/pruefung/ergebnis
-PruefungsService
-PruefungRepository
-PRUEFUNG
+GET  /api/verwaltung/schueler
+POST /api/verwaltung/schueler
+GET  /api/verwaltung/schueler/{id}
+GET  /api/verwaltung/schueler/{id}/vertrag
+POST /api/verwaltung/schueler/{id}/vertrag/pruefen
+GET  /api/verwaltung/abschlussanfragen
+GET  /api/verwaltung/abschlussanfragen/{id}
+POST /api/verwaltung/abschlussanfragen/{id}/bestaetigen
+POST /api/verwaltung/abschlussanfragen/{id}/ablehnen
 ```
 
-## Demo-Fall 5: Ausbildung abschliessen
+Wenn `AA906` bereits bestätigt wurde, die Demo-Daten zurücksetzen oder eine neue Abschlussanfrage über den Schülerlauf stellen. Nicht erfüllte Abnahmekriterien können über `Ablehnen` als fachlicher Gegenfall gezeigt werden.
 
-1. Schueler `SC906 Oskar Lange` waehlen.
-2. Dashboard zeigen: Theorie und Praxis sind bestanden, Status ist noch nicht `ABGESCHLOSSEN`.
-3. Tab `Abschluss` oeffnen.
-4. `Ausbildung abschliessen` klicken.
-5. Ladehinweis und danach Status `ABGESCHLOSSEN` zeigen.
-
-Technischer Bezug:
-
-```text
-POST /api/ausbildung/SC906/abschliessen
-AusbildungsstatusService
-AusbildungsVertragRepository
-AUSBILDUNG_VERTRAG.STATUS
-```
-
-## Abschluss der Vorfuehrung
+## Abschluss
 
 Kurz zusammenfassen:
 
-- Logo und Header zeigen die SkyTeam-Branding-Datei aus `frontend/assets/logo.png`.
-- Frontend ist eine SPA ohne Framework.
-- PHP ist nur View-Layer.
-- Java REST-API kapselt alle Fachaktionen.
-- Services enthalten die Fachregeln.
-- Repositories kapseln Oracle-SQL oder Demo-Persistenz.
-- BPMN-Prozess ist im Dashboard nachvollziehbar abgebildet.
-- Komfortfunktionen: Suche, Status-Badges, Kontextmenue und Drag-and-Drop-Planung.
+- Logo und Header nutzen `frontend/assets/logo.png`.
+- Die Navigation ist rollenbasiert.
+- Schüler führen nur eigene Ausbildungsaktionen aus.
+- Schülerverwaltung führt Verwaltungs- und Abschlussprüfungen aus.
+- Backend schützt die Rollen zusätzlich serverseitig mit `403`.
+- BPMN wird bewusst als HTML/CSS-Prozessanzeige statt als BPMN-Renderer dargestellt.
+- Demo-Modus funktioniert ohne Oracle; Oracle bleibt über `APP_PROFILE=oracle` vorbereitet.

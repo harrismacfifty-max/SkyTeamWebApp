@@ -1,12 +1,9 @@
 package de.skyteam.flightschool.model;
 
-public record LoginResponse(
-        String token,
+public record AuthUser(
         String username,
         String displayName,
-        String role,
+        UserRole role,
         String schuelerId
 ) {
 }
-
-

@@ -1,7 +1,9 @@
 package de.skyteam.flightschool.service;
 
 import de.skyteam.flightschool.error.UnauthorizedException;
+import de.skyteam.flightschool.model.AuthUser;
 import de.skyteam.flightschool.model.LoginResponse;
+import de.skyteam.flightschool.model.UserRole;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -9,26 +11,31 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public final class AuthService {
-    private static final String DEFAULT_USERNAME = "demo";
-    private static final String DEFAULT_PASSWORD = "demo";
-    private final String username;
-    private final String password;
-    private final ConcurrentMap<String, String> activeSessions = new ConcurrentHashMap<>();
+    private final Map<String, DemoAccount> accounts = Map.of(
+            "demo", new DemoAccount("demo", new AuthUser("demo", "Demo Schüler", UserRole.SCHUELER, "SC901")),
+            "demo2", new DemoAccount("demo2", new AuthUser("demo2", "Demo Schülerverwaltung", UserRole.SCHUELERVERWALTUNG, ""))
+    );
+    private final ConcurrentMap<String, AuthUser> activeSessions = new ConcurrentHashMap<>();
 
     public AuthService() {
-        this.username = optionalEnv("AUTH_USERNAME", DEFAULT_USERNAME);
-        this.password = optionalEnv("AUTH_PASSWORD", DEFAULT_PASSWORD);
     }
 
     public LoginResponse login(Map<String, String> data) {
         String requestedUsername = ServiceSupport.required(data, "username");
         String requestedPassword = ServiceSupport.required(data, "password");
-        if (!username.equals(requestedUsername) || !password.equals(requestedPassword)) {
+        DemoAccount account = accounts.get(requestedUsername);
+        if (account == null || !account.password().equals(requestedPassword)) {
             throw new UnauthorizedException("Ungueltige Zugangsdaten.");
         }
         String token = "session-" + UUID.randomUUID();
-        activeSessions.put(token, requestedUsername);
-        return new LoginResponse(token, requestedUsername);
+        activeSessions.put(token, account.user());
+        return new LoginResponse(
+                token,
+                account.user().username(),
+                account.user().displayName(),
+                account.user().role().name(),
+                account.user().schuelerId()
+        );
     }
 
     public boolean logout(String token) {
@@ -38,7 +45,7 @@ public final class AuthService {
         return activeSessions.remove(token) != null;
     }
 
-    public Optional<String> currentUser(String token) {
+    public Optional<AuthUser> currentUser(String token) {
         if (token == null || token.isBlank()) {
             return Optional.empty();
         }
@@ -49,12 +56,7 @@ public final class AuthService {
         return currentUser(token).isPresent();
     }
 
-    private static String optionalEnv(String name, String fallback) {
-        String value = System.getenv(name);
-        if (value == null || value.isBlank()) {
-            return fallback;
-        }
-        return value.trim();
+    private record DemoAccount(String password, AuthUser user) {
     }
 }
 

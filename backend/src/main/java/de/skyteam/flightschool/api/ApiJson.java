@@ -1,6 +1,7 @@
 package de.skyteam.flightschool.api;
 
 import de.skyteam.flightschool.config.ApplicationConfig;
+import de.skyteam.flightschool.dto.AbschlussAnfrageDto;
 import de.skyteam.flightschool.dto.ApiResponse;
 import de.skyteam.flightschool.dto.AusbildungsStatusDto;
 import de.skyteam.flightschool.dto.PraxisFortschrittDto;
@@ -9,6 +10,8 @@ import de.skyteam.flightschool.dto.PruefungsErgebnisStatusDto;
 import de.skyteam.flightschool.dto.TheorieFortschrittDto;
 import de.skyteam.flightschool.dto.TheorieStornierungResponse;
 import de.skyteam.flightschool.model.Aircraft;
+import de.skyteam.flightschool.model.AusbildungsVertrag;
+import de.skyteam.flightschool.model.AuthUser;
 import de.skyteam.flightschool.model.Dashboard;
 import de.skyteam.flightschool.model.Flug;
 import de.skyteam.flightschool.model.Kurs;
@@ -166,6 +169,23 @@ public final class ApiJson {
         ));
     }
 
+    public static String ausbildungsVertrag(AusbildungsVertrag vertrag) {
+        return JsonUtil.object(JsonUtil.fields(
+                "id", vertrag.id(),
+                "schuleId", vertrag.schuleId(),
+                "startzeit", vertrag.startzeit(),
+                "endzeit", vertrag.endzeit(),
+                "status", vertrag.status(),
+                "notiz", vertrag.notiz(),
+                "geprueft", vertragGeprueft(vertrag)
+        ));
+    }
+
+    private static boolean vertragGeprueft(AusbildungsVertrag vertrag) {
+        String notiz = vertrag.notiz() == null ? "" : vertrag.notiz().toLowerCase();
+        return notiz.contains("vertrag geprueft") || notiz.contains("vertrag geprüft");
+    }
+
     public static String kurse(List<Kurs> kurse) {
         return JsonUtil.arrayOfJson(kurse.stream().map(ApiJson::kurs).toList());
     }
@@ -195,16 +215,57 @@ public final class ApiJson {
     public static String login(LoginResponse response) {
         return JsonUtil.object(JsonUtil.fields(
                 "token", response.token(),
-                "displayName", response.displayName()
+                "username", response.username(),
+                "displayName", response.displayName(),
+                "role", response.role(),
+                "schuelerId", response.schuelerId()
         ));
     }
 
-    public static String authUser(String username) {
+    public static String authUser(AuthUser user) {
         return JsonUtil.object(JsonUtil.fields(
                 "authenticated", true,
-                "username", username,
-                "displayName", username
+                "username", user.username(),
+                "displayName", user.displayName(),
+                "role", user.role().name(),
+                "schuelerId", user.schuelerId()
         ));
+    }
+
+    public static String abschlussAnfrage(AusbildungsStatusDto status, String anfrageStatus) {
+        return JsonUtil.object(JsonUtil.fields(
+                "schuelerId", status.schuelerId(),
+                "status", anfrageStatus,
+                "theorieBestanden", status.theorieBestanden(),
+                "praxisBestanden", status.praxisBestanden(),
+                "abschlussBereit", status.theorieBestanden() && status.praxisBestanden()
+        ));
+    }
+
+    public static String abschlussAnfragen(List<AusbildungsStatusDto> statuses) {
+        return JsonUtil.arrayOfJson(statuses.stream()
+                .map(status -> abschlussAnfrage(status, "ANGEFRAGT"))
+                .toList());
+    }
+
+    public static String abschlussAnfrageDto(AbschlussAnfrageDto anfrage) {
+        return JsonUtil.object(JsonUtil.fields(
+                "id", anfrage.id(),
+                "schuelerId", anfrage.schuelerId(),
+                "status", anfrage.status().name(),
+                "begruendung", anfrage.begruendung(),
+                "angefragtAm", anfrage.angefragtAm(),
+                "geprueftAm", anfrage.geprueftAm(),
+                "theorieKriterienErfuellt", anfrage.theorieKriterienErfuellt(),
+                "praxisKriterienErfuellt", anfrage.praxisKriterienErfuellt(),
+                "bestaetigungMoeglich", anfrage.bestaetigungMoeglich()
+        ));
+    }
+
+    public static String abschlussAnfrageDtos(List<AbschlussAnfrageDto> anfragen) {
+        return JsonUtil.arrayOfJson(anfragen.stream()
+                .map(ApiJson::abschlussAnfrageDto)
+                .toList());
     }
 
     public static String logout(boolean loggedOut) {
