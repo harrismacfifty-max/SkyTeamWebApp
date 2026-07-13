@@ -58,18 +58,43 @@ Der Oracle JDBC-Treiber muss fuer Docker zusaetzlich ins Backend-Image oder per 
 
 ## Repositories
 
-- `SchuelerRepository`: liest `SCHUELER`.
-- `AusbildungsVertragRepository`: liest und aktualisiert `AUSBILDUNG_VERTRAG`, verknuepft ueber `SCHUELER.ID_AUSBILDUNG_VERTRAG`.
-- `KursRepository`: liest und erzeugt Theorieeintraege in `KURSE`, aktualisiert `SCHUELER.THEORIESTUNDE`.
-- `FlugRepository`: liest und erzeugt Praxisfluege in `FLUG`, verknuepft Piloten ueber `FLUG_UND_PILOT`, aktualisiert `SCHUELER.FLUGSTUNDE`.
-- `PruefungRepository`: liest und erzeugt `PRUEFUNG`; Ergebnisse werden ohne Schemaaenderung im bestehenden Feld `TYP` als `... - bestanden` oder `... - nicht bestanden` gespeichert.
+- `SchuelerRepository`: liest `SCHUELER`; Speichern und kaskadiertes Loeschen laufen ueber das Procedure-Package.
+- `AusbildungsVertragRepository`: liest `AUSBILDUNG_VERTRAG`; Speichern und Statuswechsel laufen ueber das Procedure-Package.
+- `KursRepository`: liest Theorieeintraege aus `KURSE`; Buchen und Stornieren laufen ueber das Procedure-Package und aktualisieren `SCHUELER.THEORIESTUNDE` atomar.
+- `FlugRepository`: liest Praxisfluege aus `FLUG`; Buchen und Stornieren laufen ueber das Procedure-Package, pflegen `FLUG_UND_PILOT` und aktualisieren `SCHUELER.FLUGSTUNDE` atomar.
+- `PruefungRepository`: liest `PRUEFUNG`; Anmeldung und Ergebnis werden ueber das Procedure-Package gespeichert. Der lesbare Status bleibt in `TYP` als `... - bestanden` oder `... - nicht bestanden` erhalten, Details stehen in `NOTIZ`.
+- `AbschlussAnfrageRepository`: liest `ABSCHLUSS_ANFRAGE`; Anlegen und Statuswechsel laufen ueber das Procedure-Package.
 - `PilotRepository`: liest `PILOT`.
 - `FlugzeugRepository`: liest `FLUGZEUG`.
 - `WartungRepository`: liest `WARTUNG` und `WARTUNG_UND_FLUGZEUG`.
 - `AusbildungsStatusRepository`: aggregiert `SCHUELER`, `AUSBILDUNG_VERTRAG` und `PRUEFUNG`.
 
-## Hinweis
+## Stored Procedures installieren
 
-Das vorhandene SQL-Skript enthaelt keine separate Ergebnisspalte fuer Pruefungen und keine Sequenzen fuer neue IDs. Deshalb generiert die JDBC-Schicht neue String-IDs anhand vorhandener Praefixe und speichert Pruefungsergebnisse im bestehenden `PRUEFUNG.TYP`.
+Die WebApp verwendet im Oracle-Profil das Package `SKYTEAM_WEBAPP_API`. Es ist auf die aktuellen Repository-Vertraege zugeschnitten und kollidiert deshalb nicht mit eventuell bereits vorhandenen gleichnamigen Standalone-Procedures.
+
+Nach dem Basisschema werden die Migrationen in dieser Reihenfolge als Schema-Eigentuemer ausgefuehrt:
+
+```sql
+@database/migrations/abschlussanfragen.sql
+@database/migrations/stored-procedures.sql
+```
+
+Danach muessen Package-Spezifikation und Package-Body gueltig sein:
+
+```sql
+select object_name, object_type, status
+from user_objects
+where object_name = 'SKYTEAM_WEBAPP_API';
+
+select line, position, text
+from user_errors
+where name = 'SKYTEAM_WEBAPP_API'
+order by sequence;
+```
+
+Das Package enthaelt bewusst kein `COMMIT` oder `ROLLBACK`. Transaktionsgrenzen bleiben beim JDBC-Aufruf. Oracle-Fehler aus `raise_application_error` werden von der API in verstaendliche HTTP-Fehler (400, 404 oder 409) uebersetzt.
+
+Das vorhandene Basisschema enthaelt keine Sequenzen fuer neue IDs. Die Procedures erzeugen die String-IDs fuer Kurse, Fluege und Pruefungen unter einer Tabellensperre anhand der vorhandenen Praefixe. IDs fuer Schueler, Vertraege und Abschlussanfragen werden weiterhin vom bestehenden Service-Vertrag vorgegeben.
 
 Die Business-Services nutzen ausschliesslich Repository-Interfaces. SQL bleibt in `repository/jdbc`.

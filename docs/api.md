@@ -57,17 +57,25 @@ CORS ist fuer lokale Frontends aktiviert.
 
 ```json
 {
-  "username": "demo",
-  "password": "demo"
+  "username": "sc901",
+  "password": "demo901"
 }
 ```
 
 Demo-Zugaenge:
 
-```text
-demo/demo    -> SCHUELER
-demo2/demo2  -> SCHUELERVERWALTUNG
-```
+| Benutzername | Passwort | Rolle | Schüler-ID |
+|---|---|---|---|
+| `sc901` | `demo901` | `SCHUELER` | `SC901` |
+| `sc902` | `demo902` | `SCHUELER` | `SC902` |
+| `sc903` | `demo903` | `SCHUELER` | `SC903` |
+| `sc904` | `demo904` | `SCHUELER` | `SC904` |
+| `sc905` | `demo905` | `SCHUELER` | `SC905` |
+| `sc906` | `demo906` | `SCHUELER` | `SC906` |
+| `sc907` | `demo907` | `SCHUELER` | `SC907` |
+| `demo2` | `demo2` | `SCHUELERVERWALTUNG` | `null` |
+
+`demo/demo` bleibt nur aus Kompatibilitätsgründen als Legacy-Alias für `SC901` erhalten und wird für Präsentation, Dokumentation und neue Tests nicht mehr verwendet. Die Demo-Zugänge sind im Profil `oracle` nicht aktiviert.
 
 Antwort:
 
@@ -77,8 +85,8 @@ Antwort:
   "message": "Login erfolgreich.",
   "data": {
     "token": "session-...",
-    "username": "demo",
-    "displayName": "Demo Schüler",
+    "username": "sc901",
+    "displayName": "Jonas Keller",
     "role": "SCHUELER",
     "schuelerId": "SC901"
   },
@@ -91,12 +99,14 @@ Antwort:
 ```json
 {
   "authenticated": true,
-  "username": "demo2",
-  "displayName": "Demo Schülerverwaltung",
-  "role": "SCHUELERVERWALTUNG",
-  "schuelerId": ""
+  "username": "sc901",
+  "displayName": "Jonas Keller",
+  "role": "SCHUELER",
+  "schuelerId": "SC901"
 }
 ```
+
+Für `demo2` liefert `GET /api/auth/me` die Rolle `SCHUELERVERWALTUNG` und `"schuelerId": null`.
 
 Bei falscher Rolle:
 
@@ -125,7 +135,9 @@ Authorization: Bearer <token-aus-login>
 
 `SCHUELERVERWALTUNG` darf Schülerdaten prüfen/anlegen/löschen, Vertrags- und Statusdaten prüfen, Prüfungsergebnisse speichern, Abschlussanfragen lesen sowie Abschlüsse bestätigen oder ablehnen.
 
-Schreibende Aktionen werden serverseitig geprüft; verbotene Aktionen liefern `403`. Schüleraktionen sind immer auf den eigenen Datensatz beschränkt. `demo/demo` ist im Demo-Modus fest `SC901` zugeordnet und darf keine Theorie-, Praxis- oder Prüfungsanmeldung für andere Schüler auslösen.
+Schreibende Aktionen werden serverseitig geprüft; verbotene Aktionen liefern `403`. Schüleraktionen sind immer auf den jeweils zugeordneten Datensatz beschränkt. Beispielsweise ist `sc901/demo901` fest `SC901` zugeordnet und darf keine Theorie-, Praxis- oder Prüfungsanmeldung für andere Schüler auslösen.
+
+Bei Schülerkonten ist die `schuelerId` aus der Session verbindlich. Die `/me`-Endpunkte und Schüleraktionen benötigen deshalb keine `schuelerId` oder `studentId` vom Client. Abweichende IDs in Pfad, Query oder JSON werden mit `403` abgewiesen. Die Verwaltung verwendet weiterhin die Endpunkte unter `/api/verwaltung/**` mit expliziten Schüler-IDs.
 
 Theorie-, Praxis- und Prüfungsanmeldungen sind ausschließlich Schülerfunktionen:
 
@@ -138,7 +150,7 @@ Theorie-, Praxis- und Prüfungsanmeldungen sind ausschließlich Schülerfunktion
 
 ## Verwaltung
 
-Alle Endpunkte unter `/api/verwaltung/**` erfordern die Rolle `SCHUELERVERWALTUNG`. Ein Login mit `demo/demo` erhaelt fuer diese Endpunkte `403`.
+Alle Endpunkte unter `/api/verwaltung/**` erfordern die Rolle `SCHUELERVERWALTUNG`. Schülerkonten wie `sc901/demo901` erhalten für diese Endpunkte `403`.
 
 - `GET /api/verwaltung/schueler`
 - `GET /api/verwaltung/schueler/{id}`
@@ -184,6 +196,8 @@ Antwort:
 ## Allgemein
 
 - `GET /api/health`
+- `GET /api/schueler/me`
+- `GET /api/status/me`
 - `GET /api/schueler`
 - `GET /api/schueler/{id}`
 - `DELETE /api/schueler/{id}`
@@ -193,9 +207,9 @@ Antwort:
 Beispiel:
 
 ```powershell
-$login = Invoke-RestMethod -Method Post http://localhost:8080/api/auth/login -ContentType "application/json" -Body '{"username":"demo","password":"demo"}'
+$login = Invoke-RestMethod -Method Post http://localhost:8080/api/auth/login -ContentType "application/json" -Body '{"username":"sc901","password":"demo901"}'
 $headers = @{ Authorization = "Bearer $($login.data.token)" }
-Invoke-RestMethod http://localhost:8080/api/schueler/SC901 -Headers $headers
+Invoke-RestMethod http://localhost:8080/api/schueler/me -Headers $headers
 ```
 
 Schueleranlage fuer die Verwaltung erfolgt fachlich ueber `POST /api/verwaltung/schueler`. Der alte Pfad `POST /api/schueler` bleibt als Kompatibilitaetsroute erhalten.
@@ -218,7 +232,8 @@ Request:
 
 ## Theorie
 
-- `GET /api/theorie/{schuelerId}`
+- `GET /api/theorie/me`
+- `GET /api/theorie/{schuelerId}` (Kompatibilitätsroute mit Zugriffskontrolle)
 - `POST /api/theorie/buchen`
 - `POST /api/theorie/stornieren`
 - `GET /api/status/{schuelerId}/theorie`
@@ -227,7 +242,6 @@ Request:
 
 ```json
 {
-  "schuelerId": "SC901",
   "thema": "Theorie - Navigation",
   "termin": "2026-09-30",
   "dauerMinuten": 90,
@@ -240,7 +254,6 @@ Beispiel:
 
 ```powershell
 $body = @{
-  schuelerId = "SC901"
   thema = "Theorie - Navigation"
   termin = "2026-09-30"
   dauerMinuten = 90
@@ -255,7 +268,6 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/theorie/buchen -Headers
 
 ```json
 {
-  "schuelerId": "SC901",
   "kursId": "KTB951",
   "grund": "Termin verschoben"
 }
@@ -265,7 +277,6 @@ Beispiel:
 
 ```powershell
 $body = @{
-  schuelerId = "SC901"
   kursId = "KTB951"
   grund = "Termin verschoben"
 } | ConvertTo-Json
@@ -275,7 +286,8 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/theorie/stornieren -Hea
 
 ## Praxis
 
-- `GET /api/praxis/{schuelerId}`
+- `GET /api/praxis/me`
+- `GET /api/praxis/{schuelerId}` (Kompatibilitätsroute mit Zugriffskontrolle)
 - `POST /api/praxis/buchen`
 - `POST /api/praxis/stornieren`
 - `GET /api/status/{schuelerId}/praxis`
@@ -284,7 +296,6 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/theorie/stornieren -Hea
 
 ```json
 {
-  "schuelerId": "SC901",
   "flugzeugId": "FZ002",
   "fluglehrer": "P001",
   "termin": "2026-10-01T10:00",
@@ -298,7 +309,6 @@ Storno-Request:
 
 ```json
 {
-  "schuelerId": "SC901",
   "flugId": "FL907",
   "grund": "Termin verschoben"
 }
@@ -319,7 +329,8 @@ Fachliche Konflikte, z.B. wartungsrelevantes Flugzeug:
 
 ## Pruefung
 
-- `GET /api/pruefung/{schuelerId}`
+- `GET /api/pruefung/me`
+- `GET /api/pruefung/{schuelerId}` (Kompatibilitätsroute mit Zugriffskontrolle)
 - `POST /api/pruefung/theorie/anmelden`
 - `POST /api/pruefung/praxis/anmelden`
 - `POST /api/pruefung/ergebnis`
@@ -328,7 +339,6 @@ Fachliche Konflikte, z.B. wartungsrelevantes Flugzeug:
 
 ```json
 {
-  "schuelerId": "SC901",
   "pruefungsart": "Theoriepruefung Navigation",
   "wunschtermin": "2026-10-05",
   "pruefer": "P001",
@@ -402,12 +412,12 @@ curl http://localhost:8080/api/health
 ```bash
 curl -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
-  -d "{\"username\":\"demo\",\"password\":\"demo\"}"
+  -d "{\"username\":\"sc901\",\"password\":\"demo901\"}"
 ```
 
 ```bash
 curl -X POST http://localhost:8080/api/praxis/buchen \
   -H "Authorization: Bearer <token-aus-login>" \
   -H "Content-Type: application/json" \
-  -d "{\"schuelerId\":\"SC901\",\"flugzeugId\":\"FZ002\",\"fluglehrer\":\"P001\",\"termin\":\"2026-10-01T10:00\",\"dauerMinuten\":60,\"ausbildungsinhalt\":\"Platzrunde\"}"
+  -d "{\"flugzeugId\":\"FZ002\",\"fluglehrer\":\"P001\",\"termin\":\"2026-10-01T10:00\",\"dauerMinuten\":60,\"ausbildungsinhalt\":\"Platzrunde\"}"
 ```

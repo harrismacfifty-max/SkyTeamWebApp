@@ -47,16 +47,34 @@ Stoppen:
 docker compose down
 ```
 
-Demo-Daten komplett zuruecksetzen:
+## Demo-Daten vor einer Präsentation zurücksetzen
+
+Den Reset bewusst im Projektverzeichnis ausführen. Der direkte Docker-Ablauf lautet:
 
 ```bash
 docker compose down -v
+docker compose up --build
 ```
+
+Unter Windows steht dafür ein PowerShell-Skript bereit:
+
+```powershell
+.\scripts\reset-demo.ps1
+```
+
+Unter macOS und Linux kann das Bash-Skript verwendet werden:
+
+```bash
+chmod +x scripts/reset-demo.sh
+./scripts/reset-demo.sh
+```
+
+Der Reset löscht alle im Demo-Modus angelegten oder geänderten Schüler, Buchungen, Prüfungsanmeldungen und Abschlussbestätigungen. Er entfernt nur das lokale Docker-Compose-Volume des Demo-Modus; externe Oracle-Daten werden nicht gelöscht. Nach dem Neustart müssen der Health-Endpoint sowie die Logins `sc901/demo901` und `demo2/demo2` getestet werden.
 
 ## Start mit Oracle
 
 Oracle ist optional und wird nicht als Container erzwungen. Fuer eine externe Oracle-Datenbank werden Umgebungsvariablen genutzt.
-Details stehen in [docs/oracle-setup.md](docs/oracle-setup.md).
+Details stehen in [docs/oracle-setup.md](docs/oracle-setup.md). Im Oracle-Profil werden Schreiboperationen ueber das Package `SKYTEAM_WEBAPP_API` ausgefuehrt. Nach dem Basisschema sind dafuer einmalig `database/migrations/abschlussanfragen.sql` und danach `database/migrations/stored-procedures.sql` zu installieren.
 
 Beispiel mit Shell-Variablen:
 
@@ -168,23 +186,28 @@ Das WebApp-Logo liegt unter `./frontend/assets/logo.png` und wird oben links im 
 
 ## Demo-Login
 
-```text
-Schüler:
-username: demo
-password: demo
-role: SCHUELER
+Die Demo-Schüler besitzen jeweils ein eigenes Konto. Das Verwaltungskonto ist in derselben Übersicht aufgeführt:
 
-Schülerverwaltung:
-username: demo2
-password: demo2
-role: SCHUELERVERWALTUNG
-```
+| Account | Passwort | Schüler | Zustand |
+|---|---|---|---|
+| `sc901` | `demo901` | `SC901` | laufende Ausbildung, Mindeststunden fehlen |
+| `sc902` | `demo902` | `SC902` | Theorieprüfung freigeschaltet |
+| `sc903` | `demo903` | `SC903` | Praxisprüfung freigeschaltet |
+| `sc904` | `demo904` | `SC904` | Theorieprüfung nicht bestanden |
+| `sc905` | `demo905` | `SC905` | Praxisprüfung nicht bestanden |
+| `sc906` | `demo906` | `SC906` | Theorie und Praxis bestanden, Abschluss angefragt |
+| `sc907` | `demo907` | `SC907` | Ausbildung abgeschlossen |
+| `demo2` | `demo2` | Schülerverwaltung | Verwaltungsfunktionen |
 
-Das Login ist bewusst einfach gehalten. Es gibt keine externe Authentifizierung und kein JWT. Rollen werden serverseitig ueber die InMemory-Session geprueft.
+Jedes Konto `sc901` bis `sc907` ist serverseitig fest mit genau dem gleichnamigen Schülerdatensatz `SC901` bis `SC907` verknüpft. Schüler können ausschließlich die eigene Ausbildung laden und verändern; manipulierte Zugriffe auf andere Schüler werden mit HTTP `403` abgewiesen. `demo2` ist kein Schülerkonto, besitzt keine Schüler-ID und verwendet ausschließlich die Rolle `SCHUELERVERWALTUNG`.
+
+Der frühere Zugang `demo` / `demo` bleibt nur als ausdrücklich dokumentierter Legacy-Alias für `SC901` erhalten. Für Präsentation, Dokumentation und neue Tests wird stattdessen `sc901` / `demo901` verwendet.
+
+Das Login ist bewusst einfach gehalten. Es gibt keine externe Authentifizierung und kein JWT. Rollen werden serverseitig über die InMemory-Session geprüft. Die Konten werden nur in den Profilen `demo` und `dev` aktiviert; im Profil `oracle` sind sie nicht verfügbar.
 
 ## Rollen und Menüs
 
-Schüler (`demo/demo`) sieht nur Funktionen für den eigenen Ausbildungsprozess:
+Schüler, beispielsweise `sc901/demo901`, sehen nur Funktionen für ihren jeweils zugeordneten Ausbildungsprozess:
 
 - Main Menu / Dashboard
 - Theorie anmelden
@@ -194,6 +217,8 @@ Schüler (`demo/demo`) sieht nur Funktionen für den eigenen Ausbildungsprozess:
 - Logout
 
 Schüler dürfen eigene Theorieeinheiten, Praxiseinheiten und Prüfungen anmelden. Sie können eine Abschlussanfrage stellen und deren Status sehen. Sie können keine Schüler anlegen, keine Schülerdaten anderer Personen verwalten und keinen Abschluss selbst bestätigen.
+
+Die Schüler-ID wird für Schülerzugriffe verbindlich aus der serverseitigen Session übernommen. Das Frontend verwendet dafür `/api/schueler/me`, `/api/status/me`, `/api/theorie/me`, `/api/praxis/me` und `/api/pruefung/me` und sendet bei Schüleraktionen keine Schüler-ID. Manipulierte fremde IDs in Pfad, Query oder JSON werden serverseitig mit HTTP `403` abgewiesen.
 
 Schülerverwaltung (`demo2/demo2`) sieht nur Verwaltungsfunktionen:
 
@@ -234,7 +259,7 @@ SC902  Genug Theoriestunden, Theoriepruefung offen
 SC903  Genug Flugstunden, Praxispruefung offen
 SC904  Theoriepruefung nicht bestanden
 SC905  Praxispruefung nicht bestanden
-SC906  Theorie und Praxis bestanden, bereit fuer Abschluss
+SC906  Theorie und Praxis bestanden, Abschluss angefragt
 SC907  Ausbildung abgeschlossen
 ```
 
@@ -314,7 +339,7 @@ chmod +x scripts/check-encoding.sh
 
 ## Bekannte Einschraenkungen
 
-- MVP-Login mit zwei Demo-Benutzern, einfache Rollenpruefung, kein JWT, keine externe Authentifizierung.
+- MVP-Login mit acht sichtbaren Demo-Konten und einem Legacy-Alias, einfache Rollenpruefung, kein JWT, keine externe Authentifizierung.
 - Keine E-Mail, keine Zahlung, keine externen Systeme.
 - Demo-Modus ist dateibasiert und nicht fuer parallele Mehrbenutzer-Szenarien gedacht.
 - Oracle-Modus ist vorbereitet, benoetigt aber einen passenden Oracle JDBC-Treiber und ein zur SQL-Struktur passendes Schema.

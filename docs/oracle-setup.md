@@ -72,6 +72,17 @@ docker compose up --build
 
 Wenn der Oracle JDBC-Treiber nicht im Backend-Image enthalten ist, muss er separat bereitgestellt und ueber `EXTRA_CLASSPATH` eingebunden werden.
 
+## Datenbank-Package installieren
+
+Das Oracle-Profil verwendet direkte SQL-Abfragen zum Lesen und das Package `SKYTEAM_WEBAPP_API` fuer fachliche Schreiboperationen. Nach dem vorhandenen Basisschema muessen einmalig die beiden Migrationen in dieser Reihenfolge ausgefuehrt werden:
+
+```sql
+@database/migrations/abschlussanfragen.sql
+@database/migrations/stored-procedures.sql
+```
+
+Die zweite Migration ergaenzt `PRUEFUNG.NOTIZ` idempotent und erstellt Package-Spezifikation und Package-Body. Sie veraendert keine Demo-/InMemory-Daten. Details und Pruefabfragen stehen in [oracle-repositories.md](oracle-repositories.md).
+
 ## Healthcheck
 
 ```text

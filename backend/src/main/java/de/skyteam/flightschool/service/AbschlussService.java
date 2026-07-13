@@ -7,6 +7,7 @@ import de.skyteam.flightschool.error.NotFoundException;
 import de.skyteam.flightschool.error.ValidationException;
 import de.skyteam.flightschool.model.AbschlussAnfrage;
 import de.skyteam.flightschool.model.AbschlussAnfrageStatus;
+import de.skyteam.flightschool.model.AusbildungsStatusCode;
 import de.skyteam.flightschool.repository.AbschlussAnfrageRepository;
 import de.skyteam.flightschool.repository.SchuelerRepository;
 import java.time.LocalDateTime;
@@ -29,6 +30,9 @@ public final class AbschlussService {
 
     public AbschlussAnfrageDto requestAbschluss(String schuelerId) {
         requireSchueler(schuelerId);
+        if (ausbildungsstatusService.status(schuelerId).status() == AusbildungsStatusCode.ABGESCHLOSSEN) {
+            throw new BusinessConflictException("Ausbildung ist bereits abgeschlossen; eine neue Abschlussanfrage ist nicht möglich.");
+        }
         return abschlussAnfragen.findLatestBySchuelerId(schuelerId)
                 .filter(this::isAktiv)
                 .map(this::toDto)

@@ -59,7 +59,9 @@ Schülerverwaltung      Schülerdaten prüfen, Vertrag prüfen, Schüler anlegen
 Prüfungsverwaltung     Abschlussanfrage prüfen, Abnahmekriterien prüfen, Abschluss bestätigen
 ```
 
-Die WebApp kennt zwei Loginrollen: `SCHUELER` fuer den eigenen Ausbildungsprozess und `SCHUELERVERWALTUNG` fuer Verwaltungsfunktionen. `demo/demo` meldet als Schueler an, `demo2/demo2` als Schuelerverwaltung. Die BPMN-Lane `Pruefungsverwaltung` wird im MVP als fachlicher Bereich der Schuelerverwaltung umgesetzt.
+Die WebApp kennt zwei Loginrollen: `SCHUELER` fuer den eigenen Ausbildungsprozess und `SCHUELERVERWALTUNG` fuer Verwaltungsfunktionen. Im Demo-Profil besitzt `SC901` bis `SC907` jeweils ein eigenes Schülerkonto (`sc901` bis `sc907`); `demo2/demo2` meldet als Schuelerverwaltung an. `demo/demo` bleibt ausschließlich als nicht empfohlener Legacy-Alias fuer `SC901` erhalten; Präsentation und neue Tests verwenden `sc901/demo901`. Die BPMN-Lane `Pruefungsverwaltung` wird im MVP als fachlicher Bereich der Schuelerverwaltung umgesetzt.
+
+Für die Rolle `SCHUELER` ist die `schuelerId` der serverseitigen Session die verbindliche Identität. Das Frontend verwendet `/api/schueler/me`, `/api/status/me`, `/api/theorie/me`, `/api/praxis/me` und `/api/pruefung/me`; Schüleraktionen senden keine Schüler-ID. Kompatible ID-Routen bleiben serverseitig geschützt und liefern bei einer von der Session abweichenden ID `403`. Nur die Schülerverwaltung wählt über `/api/verwaltung/**` unterschiedliche Schüler aus.
 
 Schueler koennen eigene Theorie-, Praxis- und Pruefungsanmeldungen ausfuehren und eine Abschlussanfrage stellen. Die Schuelerverwaltung kann Schuelerdaten und Vertraege pruefen, Schueler anlegen und Abschlussanfragen bestaetigen oder ablehnen. Die Schuelerverwaltung kann keine Theorie-, Praxis- oder Pruefungsanmeldung als Schueleraktion ausfuehren.
 
@@ -149,7 +151,7 @@ Business-Services haengen nur von diesen Interfaces ab. SQL ist vollstaendig in 
 
 ## Oracle-Modus
 
-Oracle wird ueber `APP_PROFILE=oracle` aktiviert. Die JDBC-Implementierungen nutzen explizite SQL-Statements gegen die bestehenden Tabellen:
+Oracle wird ueber `APP_PROFILE=oracle` aktiviert. Die JDBC-Implementierungen lesen mit expliziten SQL-Abfragen aus den bestehenden Tabellen. Fachliche Schreiboperationen rufen ueber `CallableStatement` das Package `SKYTEAM_WEBAPP_API` auf. Dadurch bleiben die Repository-Interfaces und Business-Services unveraendert, waehrend zusammengehoerige Tabellenupdates atomar in Oracle ausgefuehrt werden.
 
 ```text
 SCHUELER
@@ -163,7 +165,10 @@ WARTUNG
 SCHUELER_UND_PILOT
 FLUG_UND_PILOT
 WARTUNG_UND_FLUGZEUG
+ABSCHLUSS_ANFRAGE
 ```
+
+Das Package wird mit `database/migrations/stored-procedures.sql` installiert. Es wird nur vom Oracle-Profil verwendet; Demo-/InMemory-Repositories bleiben davon unberuehrt.
 
 Konfiguration erfolgt ueber:
 

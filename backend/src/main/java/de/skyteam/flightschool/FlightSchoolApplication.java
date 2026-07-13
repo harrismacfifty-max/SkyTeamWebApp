@@ -9,6 +9,7 @@ import de.skyteam.flightschool.service.AircraftService;
 import de.skyteam.flightschool.service.AuthService;
 import de.skyteam.flightschool.service.AusbildungsstatusService;
 import de.skyteam.flightschool.service.DashboardService;
+import de.skyteam.flightschool.service.DemoAccountProvider;
 import de.skyteam.flightschool.service.LessonService;
 import de.skyteam.flightschool.service.PraxisService;
 import de.skyteam.flightschool.service.PruefungsService;
@@ -82,7 +83,7 @@ public final class FlightSchoolApplication {
                 repositories.profile(),
                 repositories.databaseMode(),
                 repositories::databaseReachable,
-                new AuthService(),
+                new AuthService(new DemoAccountProvider(repositories.profile(), repositories.schueler())),
                 studentService,
                 aircraftService,
                 lessonService,

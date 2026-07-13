@@ -3,10 +3,12 @@ package de.skyteam.flightschool.repository.jdbc;
 import de.skyteam.flightschool.dto.PraxisBuchungRequest;
 import de.skyteam.flightschool.model.Flug;
 import de.skyteam.flightschool.repository.FlugRepository;
+import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,68 +46,32 @@ public final class JdbcFlugRepository implements FlugRepository {
 
     @Override
     public Flug createPraxisFlug(PraxisBuchungRequest request) {
-        String insertFlightSql = """
-                insert into FLUG (
-                    ID_FLUG, ID_SCHUELER, ID_FLUGZEUG, DATUM, STARTZEIT, ENDZEIT,
-                    START_FLUGHAFEN, ZIEL_FLUGHAFEN, FLUG_ART
-                )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """;
-        String insertPilotSql = """
-                insert into FLUG_UND_PILOT (ID_FLUG, ID_PILOT)
-                values (?, ?)
-                """;
-        String updateHoursSql = """
-                update SCHUELER
-                set FLUGSTUNDE = nvl(FLUGSTUNDE, 0) + ?
-                where ID_SCHUELER = ?
-                """;
-        try (Connection connection = connections.open()) {
-            connection.setAutoCommit(false);
-            String id = JdbcSupport.nextId(connection, "FLUG", "ID_FLUG", "FL");
+        try (Connection connection = connections.open();
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.PRAXIS_BUCHEN)) {
             LocalDateTime start = JdbcSupport.parseDateTime(request.termin());
             LocalDateTime end = start.plusMinutes(request.dauerMinuten());
-            try (PreparedStatement insertFlight = connection.prepareStatement(insertFlightSql);
-                 PreparedStatement insertPilot = connection.prepareStatement(insertPilotSql);
-                 PreparedStatement updateHours = connection.prepareStatement(updateHoursSql)) {
-                insertFlight.setString(1, id);
-                insertFlight.setString(2, request.schuelerId());
-                insertFlight.setString(3, request.flugzeugId());
-                insertFlight.setTimestamp(4, JdbcSupport.timestamp(start));
-                insertFlight.setTimestamp(5, JdbcSupport.timestamp(start));
-                insertFlight.setTimestamp(6, JdbcSupport.timestamp(end));
-                insertFlight.setString(7, "EDDV");
-                insertFlight.setString(8, "EDDV");
-                insertFlight.setString(9, request.ausbildungsinhalt());
-                insertFlight.executeUpdate();
-
-                if (request.fluglehrer() != null && !request.fluglehrer().isBlank()) {
-                    insertPilot.setString(1, id);
-                    insertPilot.setString(2, request.fluglehrer().trim());
-                    insertPilot.executeUpdate();
-                }
-
-                updateHours.setDouble(1, request.dauerMinuten() / 60.0);
-                updateHours.setString(2, request.schuelerId());
-                updateHours.executeUpdate();
-                connection.commit();
-                return new Flug(
-                        id,
-                        request.schuelerId(),
-                        request.flugzeugId(),
-                        start,
-                        start,
-                        end,
-                        "EDDV",
-                        "EDDV",
-                        request.ausbildungsinhalt()
-                );
-            } catch (SQLException exception) {
-                connection.rollback();
-                throw exception;
-            } finally {
-                connection.setAutoCommit(true);
-            }
+            statement.setString(1, request.schuelerId());
+            statement.setString(2, request.flugzeugId());
+            statement.setString(3, request.fluglehrer().trim());
+            statement.setTimestamp(4, JdbcSupport.timestamp(start));
+            statement.setInt(5, request.dauerMinuten());
+            statement.setString(6, "EDDV");
+            statement.setString(7, "EDDV");
+            statement.setString(8, request.ausbildungsinhalt());
+            statement.registerOutParameter(9, Types.VARCHAR);
+            statement.execute();
+            String id = statement.getString(9);
+            return new Flug(
+                    id,
+                    request.schuelerId(),
+                    request.flugzeugId(),
+                    start,
+                    start,
+                    end,
+                    "EDDV",
+                    "EDDV",
+                    request.ausbildungsinhalt()
+            );
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);
         }
@@ -113,65 +79,13 @@ public final class JdbcFlugRepository implements FlugRepository {
 
     @Override
     public boolean stornierePraxisFlug(String schuelerId, String flugId) {
-        String selectSql = """
-                select STARTZEIT, ENDZEIT
-                from FLUG
-                where ID_FLUG = ? and ID_SCHUELER = ?
-                """;
-        String deletePilotSql = """
-                delete from FLUG_UND_PILOT
-                where ID_FLUG = ?
-                """;
-        String deleteFlugSql = """
-                delete from FLUG
-                where ID_FLUG = ? and ID_SCHUELER = ?
-                """;
-        String updateHoursSql = """
-                update SCHUELER
-                set FLUGSTUNDE = greatest(0, nvl(FLUGSTUNDE, 0) - ?)
-                where ID_SCHUELER = ?
-                """;
-        try (Connection connection = connections.open()) {
-            connection.setAutoCommit(false);
-            try (PreparedStatement select = connection.prepareStatement(selectSql);
-                 PreparedStatement deletePilot = connection.prepareStatement(deletePilotSql);
-                 PreparedStatement deleteFlug = connection.prepareStatement(deleteFlugSql);
-                 PreparedStatement updateHours = connection.prepareStatement(updateHoursSql)) {
-                select.setString(1, flugId);
-                select.setString(2, schuelerId);
-                double hours;
-                try (ResultSet resultSet = select.executeQuery()) {
-                    if (!resultSet.next()) {
-                        connection.rollback();
-                        return false;
-                    }
-                    LocalDateTime start = JdbcSupport.dateTime(resultSet, "STARTZEIT");
-                    LocalDateTime end = JdbcSupport.dateTime(resultSet, "ENDZEIT");
-                    if (start == null || end == null || end.isBefore(start)) {
-                        hours = 0.0;
-                    } else {
-                        hours = java.time.Duration.between(start, end).toMinutes() / 60.0;
-                    }
-                }
-
-                deletePilot.setString(1, flugId);
-                deletePilot.executeUpdate();
-
-                deleteFlug.setString(1, flugId);
-                deleteFlug.setString(2, schuelerId);
-                boolean deleted = deleteFlug.executeUpdate() > 0;
-
-                updateHours.setDouble(1, hours);
-                updateHours.setString(2, schuelerId);
-                updateHours.executeUpdate();
-                connection.commit();
-                return deleted;
-            } catch (SQLException exception) {
-                connection.rollback();
-                throw exception;
-            } finally {
-                connection.setAutoCommit(true);
-            }
+        try (Connection connection = connections.open();
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.PRAXIS_STORNIEREN)) {
+            statement.setString(1, schuelerId);
+            statement.setString(2, flugId);
+            statement.registerOutParameter(3, Types.NUMERIC);
+            statement.execute();
+            return statement.getInt(3) > 0;
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);
         }

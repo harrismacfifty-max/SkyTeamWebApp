@@ -92,6 +92,32 @@ const AIRCRAFT_OPTIONS = [
   { id: "FZ004", type: "Diamond DA20", status: "gesperrt", maintenance: "gesperrt", available: false }
 ];
 
+const PRACTICE_DEFAULTS = Object.freeze({
+  pilotId: "P001",
+  aircraftId: "FZ002",
+  startAirport: "EDDV",
+  destinationAirport: "EDDV"
+});
+const PRACTICE_NEGATIVE_TEST_AIRCRAFT_ID = "FZ001";
+
+const DEMO_LOGIN_ACCOUNTS = Object.freeze({
+  students: Object.freeze([
+    Object.freeze({ username: "sc901", password: "demo901", studentId: "SC901", state: "Laufende Ausbildung, Mindeststunden fehlen" }),
+    Object.freeze({ username: "sc902", password: "demo902", studentId: "SC902", state: "Theorieprüfung freigeschaltet" }),
+    Object.freeze({ username: "sc903", password: "demo903", studentId: "SC903", state: "Praxisprüfung freigeschaltet" }),
+    Object.freeze({ username: "sc904", password: "demo904", studentId: "SC904", state: "Theorieprüfung nicht bestanden" }),
+    Object.freeze({ username: "sc905", password: "demo905", studentId: "SC905", state: "Praxisprüfung nicht bestanden" }),
+    Object.freeze({ username: "sc906", password: "demo906", studentId: "SC906", state: "Theorie und Praxis bestanden, Abschluss angefragt" }),
+    Object.freeze({ username: "sc907", password: "demo907", studentId: "SC907", state: "Ausbildung abgeschlossen" })
+  ]),
+  management: Object.freeze({
+    username: "demo2",
+    password: "demo2",
+    studentId: null,
+    state: "Schülerverwaltung"
+  })
+});
+
 const PLANNING_COLUMNS = [
   { id: "open-theory", title: "Offene Theorieanfragen", accepts: ["theory-planned"] },
   { id: "planned-theory", title: "Geplante Theoriestunden", accepts: ["theory-request"] },
@@ -112,6 +138,17 @@ const state = {
   action: false,
   error: "",
   notice: "",
+  loginCredentials: {
+    username: "",
+    password: ""
+  },
+  health: {
+    apiOnline: null,
+    activeProfile: "",
+    databaseMode: "",
+    databaseReachable: null,
+    timestamp: ""
+  },
   students: [],
   studentStatuses: {},
   studentFilters: {
@@ -124,10 +161,7 @@ const state = {
     courses: "",
     exams: ""
   },
-  practiceSelection: {
-    pilotId: "P001",
-    aircraftId: "FZ002"
-  },
+  practiceSelection: practiceDefaultSelection(),
   examResultSelection: "",
   repeatMarkers: {},
   modal: null,
@@ -222,6 +256,28 @@ function yesNo(value) {
   return value ? "Ja" : "Nein";
 }
 
+function healthProfileLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["demo", "dev"].includes(normalized)) {
+    return "Demo";
+  }
+  if (normalized === "oracle") {
+    return "Oracle";
+  }
+  return value || "Unbekannt";
+}
+
+function healthDatabaseModeLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[_\s-]/g, "");
+  if (["demo", "dev", "memory", "inmemory"].includes(normalized)) {
+    return "InMemory";
+  }
+  if (normalized === "oracle") {
+    return "Oracle";
+  }
+  return value || "Unbekannt";
+}
+
 function normalizeText(value) {
   return String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
@@ -236,6 +292,19 @@ function pilotById(id) {
 
 function aircraftById(id) {
   return AIRCRAFT_OPTIONS.find((aircraft) => aircraft.id === id) || null;
+}
+
+function practiceDefaultSelection() {
+  const preferredPilot = pilotById(PRACTICE_DEFAULTS.pilotId);
+  const preferredAircraft = aircraftById(PRACTICE_DEFAULTS.aircraftId);
+  return {
+    pilotId: preferredPilot?.available ? preferredPilot.id : PILOT_OPTIONS.find((pilot) => pilot.available)?.id || "",
+    aircraftId: preferredAircraft?.available ? preferredAircraft.id : AIRCRAFT_OPTIONS.find((aircraft) => aircraft.available)?.id || ""
+  };
+}
+
+function resetPracticeBookingDefaults() {
+  state.practiceSelection = practiceDefaultSelection();
 }
 
 function studentStatus(studentId) {
@@ -308,9 +377,28 @@ function navigateToView(view) {
   setMessage("notice", "");
 }
 
-function theoryWorkflowStatus(status = {}) {
+function isTheoryExam(exam) {
+  return normalizeText(exam?.typ).includes("theorie");
+}
+
+function isPracticeExam(exam) {
+  return normalizeText(exam?.typ).includes("praxis");
+}
+
+function hasFailedTheoryExam(exams = state.pruefungen) {
+  return exams.some((exam) => isTheoryExam(exam) && isFailedExam(exam));
+}
+
+function hasFailedPracticeExam(exams = state.pruefungen) {
+  return exams.some((exam) => isPracticeExam(exam) && isFailedExam(exam));
+}
+
+function theoryWorkflowStatus(status = {}, exams = []) {
   if (status.theorieBestanden) {
     return { label: "Bestanden", tone: "success", detail: "Theorieprüfung bestanden." };
+  }
+  if (hasFailedTheoryExam(exams)) {
+    return { label: "Nicht bestanden", tone: "warning", detail: "Wiederholungsbedarf: Theorieprüfung erneut anmelden." };
   }
   if (status.theoriePruefungFreigeschaltet) {
     return { label: "Bereit", tone: "info", detail: "Mindeststunden erreicht, Prüfung kann angemeldet werden." };
@@ -321,9 +409,12 @@ function theoryWorkflowStatus(status = {}) {
   return { label: "Offen", tone: "neutral", detail: "Noch keine Theoriestunden erfasst." };
 }
 
-function practiceWorkflowStatus(status = {}) {
+function practiceWorkflowStatus(status = {}, exams = []) {
   if (status.praxisBestanden) {
     return { label: "Bestanden", tone: "success", detail: "Praxisprüfung bestanden." };
+  }
+  if (hasFailedPracticeExam(exams)) {
+    return { label: "Nicht bestanden", tone: "warning", detail: "Wiederholungsbedarf: Praxisprüfung erneut anmelden." };
   }
   if (status.praxisPruefungFreigeschaltet) {
     return { label: "Bereit", tone: "info", detail: "Mindestflugstunden erreicht, Prüfung kann angemeldet werden." };
@@ -466,6 +557,39 @@ function isAborted(status) {
 
 function isCompleted(status) {
   return status?.status === "ABGESCHLOSSEN";
+}
+
+function trainingActionsAllowed(status = state.status) {
+  return canUseStudentActions() && !isCompleted(status) && !isAborted(status);
+}
+
+function examRegistrationUi(type, status = state.status || {}, exams = state.pruefungen) {
+  const theory = type === "theory";
+  const passed = theory ? Boolean(status.theorieBestanden) : Boolean(status.praxisBestanden);
+  const unlocked = theory
+    ? Boolean(status.theoriePruefungFreigeschaltet)
+    : Boolean(status.praxisPruefungFreigeschaltet);
+  const repeat = theory ? hasFailedTheoryExam(exams) : hasFailedPracticeExam(exams);
+  const label = theory ? "Theorieprüfung" : "Praxisprüfung";
+
+  if (isCompleted(status)) {
+    return { enabled: false, repeat, buttonLabel: `${label} nicht mehr erforderlich`, hint: "Ausbildung abgeschlossen" };
+  }
+  if (isAborted(status)) {
+    return { enabled: false, repeat, buttonLabel: `${label} nicht verfügbar`, hint: "Ausbildung nicht aktiv" };
+  }
+  if (passed) {
+    return { enabled: false, repeat: false, buttonLabel: `${label} bestanden`, hint: "Prüfung bereits bestanden" };
+  }
+  if (!unlocked) {
+    return { enabled: false, repeat, buttonLabel: repeat ? `${label} erneut anmelden` : `${label} anmelden`, hint: theory ? "Mindeststunden fehlen" : "Mindestflugstunden fehlen" };
+  }
+  return {
+    enabled: canUseStudentActions(),
+    repeat,
+    buttonLabel: repeat ? `${label} erneut anmelden` : `${label} anmelden`,
+    hint: repeat ? "Wiederholungsbedarf" : "Anmeldung möglich"
+  };
 }
 
 function blockedWhenAborted(status, fallback) {
@@ -765,6 +889,14 @@ function resetSelectedData() {
   state.planningDrag = null;
 }
 
+function resetStudentScope() {
+  state.students = [];
+  state.studentStatuses = {};
+  state.selectedStudentId = "";
+  localStorage.removeItem(STORAGE.selectedStudentId);
+  resetSelectedData();
+}
+
 function clearAuth(message = "") {
   localStorage.removeItem(STORAGE.token);
   localStorage.removeItem(STORAGE.username);
@@ -778,19 +910,19 @@ function clearAuth(message = "") {
   state.schuelerId = "";
   state.loading = false;
   state.action = false;
-  state.students = [];
-  state.studentStatuses = {};
   state.contextMenu = null;
-  state.repeatMarkers = {};
-  state.planningDrag = null;
-  state.selectedStudentId = "";
-  resetSelectedData();
+  resetStudentScope();
   setMessage(message ? "error" : "notice", message);
   render();
 }
 
 function handleApiError(error) {
   if (error && error.status === 401) {
+    if (!state.token) {
+      setMessage("error", sanitizeErrorMessage(error?.message || "Ungueltige Zugangsdaten."));
+      render();
+      return true;
+    }
     clearAuth("Bitte erneut anmelden.");
     return true;
   }
@@ -802,8 +934,41 @@ async function api(path, options) {
   return SkyTeamApi.request(path, options);
 }
 
+async function loadHealth() {
+  try {
+    const health = await api("/health");
+    state.health = {
+      apiOnline: true,
+      activeProfile: health.activeProfile || "",
+      databaseMode: health.databaseMode || "",
+      databaseReachable: typeof health.databaseReachable === "boolean" ? health.databaseReachable : null,
+      timestamp: health.timestamp || ""
+    };
+  } catch (error) {
+    state.health = {
+      apiOnline: false,
+      activeProfile: "",
+      databaseMode: "",
+      databaseReachable: null,
+      timestamp: ""
+    };
+  }
+}
+
 async function loadStudents() {
-  state.students = await api(isManagementRole() ? "/verwaltung/schueler" : "/schueler");
+  if (isStudentRole()) {
+    const student = await api("/schueler/me");
+    if (!state.schuelerId || student.id !== state.schuelerId) {
+      throw new Error("Der angemeldete Schüler konnte nicht eindeutig zugeordnet werden.");
+    }
+    state.students = [student];
+    state.studentStatuses = {};
+    state.selectedStudentId = state.schuelerId;
+    localStorage.setItem(STORAGE.selectedStudentId, state.schuelerId);
+    return;
+  }
+
+  state.students = await api("/verwaltung/schueler");
   const statuses = await Promise.all(state.students.map(async (student) => {
     try {
       return [student.id, await api(`/status/${encodeURIComponent(student.id)}/gesamt`)];
@@ -812,9 +977,7 @@ async function loadStudents() {
     }
   }));
   state.studentStatuses = Object.fromEntries(statuses.filter((entry) => entry[1]));
-  if (isStudentRole() && state.schuelerId && state.students.some((student) => student.id === state.schuelerId)) {
-    state.selectedStudentId = state.schuelerId;
-  } else if (!state.students.some((student) => student.id === state.selectedStudentId)) {
+  if (!state.students.some((student) => student.id === state.selectedStudentId)) {
     state.selectedStudentId = state.students[0]?.id || "";
   }
   if (state.selectedStudentId) {
@@ -832,16 +995,20 @@ async function loadSelectedStudentData() {
 
   const previousStudentId = state.selectedStudent?.id;
   const id = encodeURIComponent(state.selectedStudentId);
-  const studentPath = isManagementRole() ? `/verwaltung/schueler/${id}` : `/schueler/${id}`;
+  const studentPath = isManagementRole() ? `/verwaltung/schueler/${id}` : "/schueler/me";
+  const statusPath = isManagementRole() ? `/status/${id}/gesamt` : "/status/me";
+  const theoriePath = isManagementRole() ? `/theorie/${id}` : "/theorie/me";
+  const praxisPath = isManagementRole() ? `/praxis/${id}` : "/praxis/me";
+  const pruefungPath = isManagementRole() ? `/pruefung/${id}` : "/pruefung/me";
   const contractPromise = isManagementRole()
     ? api(`/verwaltung/schueler/${id}/vertrag`).catch(() => null)
     : Promise.resolve(null);
   const [student, status, theorie, praxis, pruefungen, vertrag] = await Promise.all([
     api(studentPath),
-    api(`/status/${id}/gesamt`),
-    api(`/theorie/${id}`),
-    api(`/praxis/${id}`),
-    api(`/pruefung/${id}`),
+    api(statusPath),
+    api(theoriePath),
+    api(praxisPath),
+    api(pruefungPath),
     contractPromise
   ]);
 
@@ -892,6 +1059,7 @@ async function refreshAll({ keepNotice = false } = {}) {
   render();
 
   try {
+    await loadHealth();
     await loadStudents();
     await loadSelectedStudentData();
     await loadAbschlussData();
@@ -933,28 +1101,91 @@ function render() {
   renderApplication();
 }
 
+function demoLoginAccountsVisible() {
+  const profile = String(state.health.activeProfile || "").trim().toLowerCase();
+  return state.health.apiOnline === true && ["demo", "dev"].includes(profile);
+}
+
+function renderDemoLoginAccount(account, type = "student") {
+  const studentId = account.studentId || "Verwaltung";
+  return `
+    <article class="demo-account-card ${type === "management" ? "management" : ""}">
+      <div class="demo-account-head">
+        <strong>${escapeHtml(account.username)}</strong>
+        ${renderBadge(studentId, type === "management" ? "info" : "neutral")}
+      </div>
+      <dl class="demo-account-credentials">
+        <div><dt>Benutzername</dt><dd><code>${escapeHtml(account.username)}</code></dd></div>
+        <div><dt>Passwort</dt><dd><code>${escapeHtml(account.password)}</code></dd></div>
+        <div><dt>${type === "management" ? "Rolle" : "Schüler-ID"}</dt><dd><code>${escapeHtml(studentId)}</code></dd></div>
+      </dl>
+      <p class="demo-account-state">${escapeHtml(account.state)}</p>
+      <button class="button secondary small" type="button"
+        data-demo-username="${escapeHtml(account.username)}"
+        data-demo-password="${escapeHtml(account.password)}">
+        Zugang verwenden
+      </button>
+    </article>
+  `;
+}
+
+function renderDemoLoginAccounts() {
+  if (!demoLoginAccountsVisible()) {
+    return "";
+  }
+
+  return `
+    <section class="demo-access" aria-labelledby="demo-access-title">
+      <div class="demo-access-head">
+        <div>
+          <p class="eyebrow">Präsentationskonten</p>
+          <h2 id="demo-access-title">Demo-Zugänge</h2>
+        </div>
+        ${renderBadge("Nur Demo", "info")}
+      </div>
+      <p class="alert info demo-access-notice">Diese Zugangsdaten dienen ausschließlich der Demonstration.</p>
+
+      <section class="demo-account-section" aria-labelledby="student-demo-accounts">
+        <h3 id="student-demo-accounts">Schüler</h3>
+        <div class="demo-account-grid">
+          ${DEMO_LOGIN_ACCOUNTS.students.map((account) => renderDemoLoginAccount(account)).join("")}
+        </div>
+      </section>
+
+      <section class="demo-account-section management-section" aria-labelledby="management-demo-account">
+        <h3 id="management-demo-account">Schülerverwaltung</h3>
+        <div class="demo-account-grid management-grid">
+          ${renderDemoLoginAccount(DEMO_LOGIN_ACCOUNTS.management, "management")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
 function renderLogin() {
   app.innerHTML = `
     <main class="login-page">
-      <section class="login-panel">
-        <p class="eyebrow">SkyTeam Flight School</p>
-        <h1>Anmelden</h1>
-        <p class="muted">Schüler: <strong>demo</strong> / <strong>demo</strong></p>
-        <p class="muted">Schülerverwaltung: <strong>demo2</strong> / <strong>demo2</strong></p>
-        ${state.error ? `<p class="alert error">${escapeHtml(state.error)}</p>` : ""}
-        <form id="loginForm" class="form-grid single">
-          <label>
-            Benutzername
-            <input name="username" autocomplete="username" value="demo" required>
-          </label>
-          <label>
-            Passwort
-            <input name="password" type="password" autocomplete="current-password" value="demo" required>
-          </label>
-          <button class="button primary" type="submit" ${state.action ? "disabled" : ""}>
-            ${state.action ? "Anmeldung läuft..." : "Anmelden"}
-          </button>
-        </form>
+      <section class="login-panel ${demoLoginAccountsVisible() ? "with-demo-accounts" : ""}">
+        <section class="login-form-section">
+          <p class="eyebrow">SkyTeam Flight School</p>
+          <h1>Anmelden</h1>
+          ${renderSystemStatus("login")}
+          ${state.error ? `<p class="alert error">${escapeHtml(state.error)}</p>` : ""}
+          <form id="loginForm" class="form-grid single">
+            <label>
+              Benutzername
+              <input name="username" autocomplete="username" value="${escapeHtml(state.loginCredentials.username)}" required>
+            </label>
+            <label>
+              Passwort
+              <input name="password" type="password" autocomplete="current-password" value="${escapeHtml(state.loginCredentials.password)}" required>
+            </label>
+            <button class="button primary" type="submit" ${state.action ? "disabled" : ""}>
+              ${state.action ? "Anmeldung läuft..." : "Anmelden"}
+            </button>
+          </form>
+        </section>
+        ${renderDemoLoginAccounts()}
       </section>
     </main>
   `;
@@ -993,6 +1224,38 @@ function renderRoleMenu(items = currentRoleMenu()) {
   }).join("");
 }
 
+function renderSystemStatus(context = "header") {
+  const health = state.health;
+  const isOnline = health.apiOnline === true;
+  const isOffline = health.apiOnline === false;
+  const badges = [renderBadge(
+    isOnline ? "API: online" : isOffline ? "API: offline" : "API: wird geprüft",
+    isOnline ? "success" : isOffline ? "danger" : "neutral"
+  )];
+
+  if (isOnline) {
+    badges.push(renderBadge(`Profil: ${healthProfileLabel(health.activeProfile)}`, "info"));
+    badges.push(renderBadge(
+      `Datenbankmodus: ${healthDatabaseModeLabel(health.databaseMode)}`,
+      health.databaseReachable === false ? "warning" : "neutral"
+    ));
+  }
+
+  const databaseTitle = health.databaseReachable === null
+    ? ""
+    : ` · Datenbank erreichbar: ${yesNo(health.databaseReachable)}`;
+  const title = isOnline
+    ? `Health-Endpoint erreichbar${databaseTitle}`
+    : isOffline ? "Health-Endpoint nicht erreichbar" : "Health-Endpoint wird geprüft";
+
+  return `
+    <div class="system-status ${context === "login" ? "login-system-status" : ""}"
+      role="status" aria-live="polite" title="${escapeHtml(title)}">
+      ${badges.join("")}
+    </div>
+  `;
+}
+
 function renderApplication() {
   app.innerHTML = `
     <div class="app-shell">
@@ -1008,6 +1271,7 @@ function renderApplication() {
           </div>
         </div>
         <div class="session">
+          ${renderSystemStatus()}
           <span>${renderBadge(`Angemeldet: ${state.displayName || "demo"}`, "success")}</span>
           <span>${renderBadge(roleLabel(), isManagementRole() ? "info" : "neutral")}</span>
           <button class="button secondary" id="refreshButton" type="button" ${state.loading || state.action ? "disabled" : ""}>Aktualisieren</button>
@@ -1074,11 +1338,12 @@ function contextMenuItems(menu) {
     if (!course) {
       return [];
     }
-    const unlocked = Boolean(state.theorie?.fortschritt?.theoriePruefungFreigeschaltet || state.status?.theoriePruefungFreigeschaltet);
+    const activeTraining = trainingActionsAllowed();
+    const examAction = examRegistrationUi("theory");
     return [
       { action: "course-details", label: "Details anzeigen" },
-      { action: "course-theory-exam", label: "Prüfung anmelden", disabled: !canUseStudentActions() || !unlocked || state.action, hint: canUseStudentActions() ? "Mindeststunden fehlen" : "Nur Schüler dürfen Prüfungen anmelden" },
-      { action: "course-cancel", label: "Stornieren", disabled: !canUseStudentActions() || state.action, hint: canUseStudentActions() ? "Aktion läuft" : "Nur Schüler dürfen Buchungen ändern" }
+      { action: "course-theory-exam", label: examAction.buttonLabel, disabled: !examAction.enabled || state.action, hint: examAction.hint },
+      { action: "course-cancel", label: "Stornieren", disabled: !activeTraining || state.action, hint: activeTraining ? "Aktion läuft" : "Ausbildung nicht aktiv" }
     ];
   }
 
@@ -1087,11 +1352,12 @@ function contextMenuItems(menu) {
     if (!flight) {
       return [];
     }
-    const unlocked = Boolean(state.praxis?.fortschritt?.praxisPruefungFreigeschaltet || state.status?.praxisPruefungFreigeschaltet);
+    const activeTraining = trainingActionsAllowed();
+    const examAction = examRegistrationUi("practice");
     return [
       { action: "flight-details", label: "Details anzeigen" },
-      { action: "flight-practice-exam", label: "Praxisprüfung anmelden", disabled: !canUseStudentActions() || !unlocked || state.action, hint: canUseStudentActions() ? "Mindestflugstunden fehlen" : "Nur Schüler dürfen Prüfungen anmelden" },
-      { action: "flight-cancel", label: "Stornieren", disabled: !canUseStudentActions() || state.action, hint: canUseStudentActions() ? "Aktion läuft" : "Nur Schüler dürfen Buchungen ändern" }
+      { action: "flight-practice-exam", label: examAction.buttonLabel, disabled: !examAction.enabled || state.action, hint: examAction.hint },
+      { action: "flight-cancel", label: "Stornieren", disabled: !activeTraining || state.action, hint: activeTraining ? "Aktion läuft" : "Ausbildung nicht aktiv" }
     ];
   }
 
@@ -1114,8 +1380,8 @@ function contextMenuItems(menu) {
       {
         action: "aircraft-select",
         label: "Für Buchung auswählen",
-        disabled: !canUseStudentActions() || !aircraft?.available || state.action,
-        hint: canUseStudentActions() ? "Flugzeug nicht verfügbar" : "Nur Schüler dürfen Buchungen vorbereiten"
+        disabled: !trainingActionsAllowed() || !aircraft?.available || state.action,
+        hint: trainingActionsAllowed() ? "Flugzeug nicht verfügbar" : "Ausbildung nicht aktiv"
       }
     ];
   }
@@ -1134,8 +1400,9 @@ function renderStudentContext() {
         <p class="eyebrow">${escapeHtml(contextLabel)}</p>
         <h2>${escapeHtml(studentFullName(student))}</h2>
         <div class="badge-row context-badges">
-          ${student ? renderBadge(student.id, "neutral") : ""}
-          ${training ? renderBadge(training.label, training.tone) : ""}
+          ${student ? renderBadge(`Schüler-ID: ${student.id}`, "neutral") : ""}
+          ${isStudentRole() ? renderBadge(`Rolle: ${roleLabel()}`, "neutral") : ""}
+          ${training ? renderBadge(`Ausbildungsstatus: ${training.label} (${status.status || "UNBEKANNT"})`, training.tone) : ""}
           ${student ? renderBadge(contractStatus(student), "neutral") : ""}
         </div>
       </div>
@@ -1275,8 +1542,8 @@ function renderTableSearch(key, label, placeholder) {
 }
 
 function renderStatusSummary(status = {}) {
-  const theory = theoryWorkflowStatus(status);
-  const practice = practiceWorkflowStatus(status);
+  const theory = theoryWorkflowStatus(status, state.pruefungen);
+  const practice = practiceWorkflowStatus(status, state.pruefungen);
   const exams = examWorkflowStatus(status, state.pruefungen);
   const training = trainingWorkflowStatus(status);
   const abschluss = abschlussWorkflowStatus(status);
@@ -1310,11 +1577,22 @@ function renderStudentDashboard() {
   const theorie = state.theorie?.fortschritt || {};
   const praxis = state.praxis?.fortschritt || {};
   const canComplete = Boolean(status.theorieBestanden && status.praxisBestanden);
-  const theoryInfo = theoryWorkflowStatus(status);
-  const practiceInfo = practiceWorkflowStatus(status);
+  const theoryInfo = theoryWorkflowStatus(status, state.pruefungen);
+  const practiceInfo = practiceWorkflowStatus(status, state.pruefungen);
   const examInfo = examWorkflowStatus(status, state.pruefungen);
   const trainingInfo = trainingWorkflowStatus(status);
   const abschlussInfo = abschlussWorkflowStatus(status);
+  const theoryExamAction = examRegistrationUi("theory", status, state.pruefungen);
+  const practiceExamAction = examRegistrationUi("practice", status, state.pruefungen);
+  const trainingActionsEnabled = trainingActionsAllowed(status);
+  const activeCompletionRequest = abschlussRequestIsActive(abschlussRequestForStudent(status.schuelerId));
+  const completionActionEnabled = !isCompleted(status) && !isAborted(status) && !activeCompletionRequest;
+  const examActionLabel = theoryExamAction.repeat
+    ? "Theorie-Wiederholung anmelden"
+    : practiceExamAction.repeat
+      ? "Praxis-Wiederholung anmelden"
+      : "Prüfung anmelden";
+  const examActionEnabled = theoryExamAction.enabled || practiceExamAction.enabled;
 
   return `
     <section class="dashboard-grid">
@@ -1364,6 +1642,7 @@ function renderStudentDashboard() {
         <span>Abschlussstatus</span>
         <strong>${escapeHtml(abschlussInfo.label)}</strong>
         <p>${escapeHtml(abschlussInfo.detail)}</p>
+        ${state.abschlussAnfrage?.status ? renderBadge(`Anfragestatus: ${state.abschlussAnfrage.status}`, abschlussInfo.tone) : ""}
         ${renderBooleanBadge(canComplete, "Abnahmekriterien erfüllt", "Abnahmekriterien offen")}
       </article>
 
@@ -1375,11 +1654,19 @@ function renderStudentDashboard() {
           </div>
         </div>
         <div class="quick-actions">
-          <button class="button primary" type="button" data-tab="theory">Theorie anmelden</button>
-          <button class="button primary" type="button" data-tab="practice">Praxis anmelden</button>
-          <button class="button primary" type="button" data-tab="exams">Prüfung anmelden</button>
-          <button class="button secondary" type="button" data-tab="completion">Abschluss anfragen</button>
+          <button class="button primary" type="button" data-tab="theory" ${!trainingActionsEnabled ? "disabled" : ""}
+            title="${escapeHtml(trainingActionsEnabled ? "Theoriestunde buchen" : trainingInfo.detail)}">Theorie buchen</button>
+          <button class="button primary" type="button" data-tab="practice" ${!trainingActionsEnabled ? "disabled" : ""}
+            title="${escapeHtml(trainingActionsEnabled ? "Praxisstunde buchen" : trainingInfo.detail)}">Praxis buchen</button>
+          <button class="button primary" type="button" data-tab="exams" ${!examActionEnabled ? "disabled" : ""}
+            title="${escapeHtml(examActionEnabled ? "Prüfungsanmeldung öffnen" : `${theoryExamAction.hint}; ${practiceExamAction.hint}`)}">${escapeHtml(examActionLabel)}</button>
+          <button class="button secondary" type="button" data-tab="completion" ${!completionActionEnabled ? "disabled" : ""}
+            title="${escapeHtml(isCompleted(status) ? "Ausbildung abgeschlossen" : activeCompletionRequest ? "Abschlussanfrage liegt bereits vor" : "Abschlussanfrage öffnen")}">
+            ${escapeHtml(isCompleted(status) ? "Ausbildung abgeschlossen" : activeCompletionRequest ? "Abschluss angefragt" : "Abschluss anfragen")}
+          </button>
         </div>
+        ${isCompleted(status) ? `<p class="muted action-status-note">Die Ausbildung ist abgeschlossen. Neue Buchungen, Prüfungsanmeldungen und Abschlussanfragen sind nicht mehr vorgesehen.</p>` : ""}
+        ${theoryExamAction.repeat || practiceExamAction.repeat ? `<p class="alert info action-status-note">Wiederholungsbedarf erkannt: ${escapeHtml(theoryExamAction.repeat ? "Theorieprüfung" : "Praxisprüfung")} kann erneut angemeldet werden.</p>` : ""}
       </article>
 
       ${renderProcessOverview(status)}
@@ -1780,7 +2067,77 @@ function renderManagementHomeView() {
           <button class="button secondary small" type="button" data-tab="completion">Öffnen</button>
         </article>
       </section>
+
+      ${renderManagementStudentOverview()}
     </section>
+  `;
+}
+
+function renderManagementStudentOverview() {
+  if (!state.students.length) {
+    return `
+      <article class="panel management-student-overview">
+        <p class="muted empty-inline">Keine Schüler für die Verwaltungsübersicht vorhanden.</p>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="panel management-student-overview">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Zentrale Übersicht</p>
+          <h3>Schüler- und Abschlussstatus</h3>
+          <p class="muted">Die Kriterien stammen aus dem berechneten Ausbildungsstatus; offene Abschlussanfragen können direkt geöffnet werden.</p>
+        </div>
+        ${renderBadge(`${state.students.length} Schüler`, "info")}
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Schüler-ID</th>
+              <th>Name</th>
+              <th>Abschlussstatus</th>
+              <th>Theorie erfüllt</th>
+              <th>Praxis erfüllt</th>
+              <th>Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.students.map((student) => {
+              const status = studentStatus(student.id);
+              const hasStatus = Boolean(status.schuelerId);
+              const completion = abschlussWorkflowStatus({ ...status, schuelerId: student.id });
+              const openRequest = state.abschlussAnfragen.find((request) => request.schuelerId === student.id);
+              return `
+                <tr>
+                  <td><strong>${escapeHtml(student.id)}</strong></td>
+                  <td>${escapeHtml(studentFullName(student))}</td>
+                  <td>${renderBadge(completion.label, completion.tone)}</td>
+                  <td>${hasStatus ? renderBooleanBadge(status.theorieBestanden, "Ja", "Nein") : renderBadge("Unbekannt", "neutral")}</td>
+                  <td>${hasStatus ? renderBooleanBadge(status.praxisBestanden, "Ja", "Nein") : renderBadge("Unbekannt", "neutral")}</td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="button secondary small" type="button"
+                        data-select-student="${escapeHtml(student.id)}" data-target-view="student-review" ${state.action ? "disabled" : ""}>
+                        Details öffnen
+                      </button>
+                      ${openRequest ? `
+                        <button class="button small" type="button"
+                          data-select-student="${escapeHtml(student.id)}" data-target-view="completion" ${state.action ? "disabled" : ""}>
+                          Abschlussanfrage prüfen
+                        </button>
+                      ` : ""}
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </article>
   `;
 }
 
@@ -1925,8 +2282,9 @@ function renderStudentsTable(students = state.students) {
 
 function renderStudentDetails(student) {
   const status = studentStatus(student.id);
-  const theory = theoryWorkflowStatus(status);
-  const practice = practiceWorkflowStatus(status);
+  const exams = student.id === state.selectedStudentId ? state.pruefungen : [];
+  const theory = theoryWorkflowStatus(status, exams);
+  const practice = practiceWorkflowStatus(status, exams);
   const training = trainingWorkflowStatus(status);
   return `
     <dl class="details">
@@ -2001,9 +2359,9 @@ function renderTheoryView() {
   const progress = state.theorie?.fortschritt || {};
   const courses = state.theorie?.kurse || [];
   const filteredCourses = filteredByTableSearch(courses, "courses", (course) => `${course.id} ${course.tag} ${course.typ} ${course.lehrer}`);
-  const unlocked = Boolean(progress.theoriePruefungFreigeschaltet);
-  const theory = theoryWorkflowStatus(state.status || {});
-  const canBook = canUseStudentActions();
+  const theory = theoryWorkflowStatus(state.status || {}, state.pruefungen);
+  const canBook = trainingActionsAllowed();
+  const examAction = examRegistrationUi("theory");
 
   return `
     <section class="stack-layout">
@@ -2046,7 +2404,7 @@ function renderTheoryView() {
             <label>Dauer Minuten<input name="dauerMinuten" type="number" min="15" step="15" value="90" required></label>
             <label>Dozent<input name="dozent" placeholder="Elias Schulz" required></label>
             <label class="full">Notizen<textarea name="notizen" rows="3" placeholder="Optionale Hinweise"></textarea></label>
-            ${!canBook ? `<p class="alert info full">Nur die Rolle Schüler darf Theoriekurse buchen.</p>` : ""}
+            ${!canBook ? `<p class="alert info full">${escapeHtml(isCompleted(state.status) ? "Die Ausbildung ist abgeschlossen; neue Theoriebuchungen sind nicht mehr vorgesehen." : "Nur eine aktive Schülerausbildung darf Theoriekurse buchen.")}</p>` : ""}
             <button class="button primary full" type="submit" ${!canBook || state.action ? "disabled" : ""}>
               ${state.action ? "Buchung läuft..." : "Theoriekurs buchen"}
             </button>
@@ -2060,15 +2418,15 @@ function renderTheoryView() {
             <p class="eyebrow">Prüfung</p>
             <h3>Theorieprüfung anmelden</h3>
           </div>
-          ${renderBooleanBadge(unlocked, "Anmeldung möglich", "Mindeststunden fehlen")}
+          ${renderBadge(examAction.hint, examAction.enabled ? "success" : examAction.repeat ? "warning" : "neutral")}
         </div>
         <form id="theoryExamForm" class="form-grid">
           <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(7)}" required></label>
           <label>Prüfer<input name="pruefer" placeholder="P001"></label>
           <label class="full">Bemerkung<textarea name="bemerkung" rows="2" placeholder="Erstanmeldung"></textarea></label>
           ${!canBook ? `<p class="alert info full">Nur die Rolle Schüler darf Prüfungen anmelden.</p>` : ""}
-          <button class="button primary full" type="submit" ${!canBook || !unlocked || state.action ? "disabled" : ""}>
-            ${state.action ? "Anmeldung läuft..." : "Theorieprüfung anmelden"}
+          <button class="button primary full" type="submit" ${!examAction.enabled || state.action ? "disabled" : ""}>
+            ${state.action ? "Anmeldung läuft..." : escapeHtml(examAction.buttonLabel)}
           </button>
         </form>
       </section>
@@ -2103,7 +2461,7 @@ function renderCoursesTable(courses) {
               <td>${Number(course.dauerMinuten || 60)} min</td>
               <td>
                 <div class="row-actions">
-                  <button class="button small danger" type="button" data-cancel-course="${escapeHtml(course.id)}" ${!canUseStudentActions() || state.action ? "disabled" : ""}>
+                  <button class="button small danger" type="button" data-cancel-course="${escapeHtml(course.id)}" ${!trainingActionsAllowed() || state.action ? "disabled" : ""}>
                     Stornieren
                   </button>
                   ${contextButton("course", course.id, "Kursaktionen")}
@@ -2127,7 +2485,7 @@ function renderPilotSelection() {
         <strong>${escapeHtml(pilot ? `${pilot.id} - ${pilot.name}` : "Kein Pilot ausgewaehlt")}</strong>
         <p>${pilot ? `${pilot.license} - ${pilot.note}` : "Bitte Pilot auswaehlen."}</p>
       </div>
-      <button class="button secondary" type="button" data-open-modal="pilot" ${state.action ? "disabled" : ""}>Pilot suchen</button>
+      <button class="button secondary" type="button" data-open-modal="pilot" ${!trainingActionsAllowed() || state.action ? "disabled" : ""}>Pilot suchen</button>
     </div>
   `;
 }
@@ -2142,7 +2500,7 @@ function renderAircraftSelection() {
         <strong>${escapeHtml(aircraft ? `${aircraft.id} - ${aircraft.type}` : "Kein Flugzeug ausgewaehlt")}</strong>
         <p>${aircraft ? `${aircraft.status} - ${aircraft.maintenance}` : "Bitte Flugzeug auswaehlen."}</p>
       </div>
-      <button class="button secondary" type="button" data-open-modal="aircraft" ${state.action ? "disabled" : ""}>Flugzeug suchen</button>
+      <button class="button secondary" type="button" data-open-modal="aircraft" ${!trainingActionsAllowed() || state.action ? "disabled" : ""}>Flugzeug suchen</button>
     </div>
   `;
 }
@@ -2196,7 +2554,7 @@ function renderPilotModalRows() {
       <td>${escapeHtml(pilot.license)}</td>
       <td>${renderBadge(pilot.note, pilot.available ? "success" : "warning")}</td>
       <td>
-        <button class="button small" type="button" data-select-pilot="${escapeHtml(pilot.id)}" ${canUseStudentActions() && (pilot.available || state.practiceSelection.pilotId === pilot.id) ? "" : "disabled"}>
+        <button class="button small" type="button" data-select-pilot="${escapeHtml(pilot.id)}" ${trainingActionsAllowed() && (pilot.available || state.practiceSelection.pilotId === pilot.id) ? "" : "disabled"}>
           ${state.practiceSelection.pilotId === pilot.id ? "Ausgewaehlt" : "Waehlen"}
         </button>
       </td>
@@ -2213,8 +2571,11 @@ function renderAircraftModalRows() {
       <td>${renderBadge(aircraft.status, aircraft.available ? "success" : "warning")}</td>
       <td>${escapeHtml(aircraft.maintenance)}</td>
       <td>
-        <button class="button small" type="button" data-select-aircraft="${escapeHtml(aircraft.id)}" ${canUseStudentActions() && (aircraft.available || state.practiceSelection.aircraftId === aircraft.id) ? "" : "disabled"}>
-          ${state.practiceSelection.aircraftId === aircraft.id ? "Ausgewaehlt" : "Waehlen"}
+        <button class="button small" type="button" data-select-aircraft="${escapeHtml(aircraft.id)}"
+          ${trainingActionsAllowed() && (aircraft.available || aircraft.id === PRACTICE_NEGATIVE_TEST_AIRCRAFT_ID) ? "" : "disabled"}>
+          ${state.practiceSelection.aircraftId === aircraft.id
+            ? "Ausgewaehlt"
+            : aircraft.available ? "Waehlen" : aircraft.id === PRACTICE_NEGATIVE_TEST_AIRCRAFT_ID ? "Negativtest" : "Gesperrt"}
         </button>
         ${contextButton("aircraft", aircraft.id, "Flugzeugaktionen")}
       </td>
@@ -2225,9 +2586,9 @@ function renderAircraftModalRows() {
 function renderPracticeView() {
   const progress = state.praxis?.fortschritt || {};
   const flights = state.praxis?.fluege || [];
-  const unlocked = Boolean(progress.praxisPruefungFreigeschaltet);
-  const practice = practiceWorkflowStatus(state.status || {});
-  const canBook = canUseStudentActions();
+  const practice = practiceWorkflowStatus(state.status || {}, state.pruefungen);
+  const canBook = trainingActionsAllowed();
+  const examAction = examRegistrationUi("practice");
 
   return `
     <section class="stack-layout">
@@ -2269,12 +2630,13 @@ function renderPracticeView() {
             <label>Endzeit<input name="endzeit" type="time" value="11:00" required></label>
             ${renderPilotSelection()}
             ${renderAircraftSelection()}
-            <label>Startflughafen<input name="startFlughafen" value="EDDV" required></label>
-            <label>Zielflughafen<input name="zielFlughafen" value="EDDV" required></label>
+            <label>Startflughafen<input name="startFlughafen" value="${escapeHtml(PRACTICE_DEFAULTS.startAirport)}" required></label>
+            <label>Zielflughafen<input name="zielFlughafen" value="${escapeHtml(PRACTICE_DEFAULTS.destinationAirport)}" required></label>
             <label>Ausbildungsinhalt<input name="ausbildungsinhalt" placeholder="Platzrunde" required></label>
             <label class="full">Notizen<textarea name="notizen" rows="3" placeholder="Optional"></textarea></label>
-            ${!canBook ? `<p class="alert info full">Nur die Rolle Schüler darf Flugstunden buchen.</p>` : ""}
-            <button class="button primary full" type="submit" ${!canBook || state.action ? "disabled" : ""}>
+            ${!canBook ? `<p class="alert info full">${escapeHtml(isCompleted(state.status) ? "Die Ausbildung ist abgeschlossen; neue Praxisbuchungen sind nicht mehr vorgesehen." : "Nur eine aktive Schülerausbildung darf Flugstunden buchen.")}</p>` : ""}
+            <button class="button secondary" type="reset" ${!canBook || state.action ? "disabled" : ""}>Standardwerte zurücksetzen</button>
+            <button class="button primary" type="submit" ${!canBook || state.action ? "disabled" : ""}>
               ${state.action ? "Buchung läuft..." : "Flugstunde buchen"}
             </button>
           </form>
@@ -2287,15 +2649,15 @@ function renderPracticeView() {
             <p class="eyebrow">Prüfung</p>
             <h3>Praxisprüfung anmelden</h3>
           </div>
-          ${renderBooleanBadge(unlocked, "Anmeldung möglich", "Mindeststunden fehlen")}
+          ${renderBadge(examAction.hint, examAction.enabled ? "success" : examAction.repeat ? "warning" : "neutral")}
         </div>
         <form id="practiceExamForm" class="form-grid">
           <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(10)}" required></label>
           <label>Prüfer<input name="pruefer" placeholder="P002"></label>
           <label class="full">Bemerkung<textarea name="bemerkung" rows="2" placeholder="Praxisprüfung"></textarea></label>
           ${!canBook ? `<p class="alert info full">Nur die Rolle Schüler darf Prüfungen anmelden.</p>` : ""}
-          <button class="button primary full" type="submit" ${!canBook || !unlocked || state.action ? "disabled" : ""}>
-            ${state.action ? "Anmeldung läuft..." : "Praxisprüfung anmelden"}
+          <button class="button primary full" type="submit" ${!examAction.enabled || state.action ? "disabled" : ""}>
+            ${state.action ? "Anmeldung läuft..." : escapeHtml(examAction.buttonLabel)}
           </button>
         </form>
       </section>
@@ -2326,7 +2688,7 @@ function renderFlightsTable(flights) {
               <td>${escapeHtml(flight.startFlughafen)} → ${escapeHtml(flight.zielFlughafen)}</td>
               <td>${escapeHtml(flight.flugArt)}</td>
               <td>
-                <button class="button small danger" type="button" data-cancel-flight="${escapeHtml(flight.id)}" ${!canUseStudentActions() || state.action ? "disabled" : ""}>
+                <button class="button small danger" type="button" data-cancel-flight="${escapeHtml(flight.id)}" ${!trainingActionsAllowed() || state.action ? "disabled" : ""}>
                   Stornieren
                 </button>
                 ${contextButton("flight", flight.id, "Flugstundenaktionen")}
@@ -2342,8 +2704,8 @@ function renderFlightsTable(flights) {
 function renderExamRegistrationView() {
   const exams = state.pruefungen || [];
   const status = state.status || {};
-  const theoryUnlocked = Boolean(status.theoriePruefungFreigeschaltet);
-  const practiceUnlocked = Boolean(status.praxisPruefungFreigeschaltet);
+  const theoryAction = examRegistrationUi("theory", status, exams);
+  const practiceAction = examRegistrationUi("practice", status, exams);
   const examInfo = examWorkflowStatus(status, exams);
   return `
     <section class="stack-layout">
@@ -2363,14 +2725,14 @@ function renderExamRegistrationView() {
               <p class="eyebrow">Theorieprüfung</p>
               <h3>Anmelden</h3>
             </div>
-            ${renderBooleanBadge(theoryUnlocked, "Anmeldung möglich", "Mindeststunden fehlen")}
+            ${renderBadge(theoryAction.hint, theoryAction.enabled ? "success" : theoryAction.repeat ? "warning" : "neutral")}
           </div>
           <form id="theoryExamForm" class="form-grid single">
             <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(7)}" required></label>
             <label>Prüfer<input name="pruefer" placeholder="P001"></label>
-            <label>Bemerkung<textarea name="bemerkung" rows="2" placeholder="Erstanmeldung"></textarea></label>
-            <button class="button primary" type="submit" ${!theoryUnlocked || state.action ? "disabled" : ""}>
-              ${state.action ? "Anmeldung läuft..." : "Theorieprüfung anmelden"}
+            <label>Bemerkung<textarea name="bemerkung" rows="2" placeholder="${theoryAction.repeat ? "Wiederholungsanmeldung" : "Erstanmeldung"}"></textarea></label>
+            <button class="button primary" type="submit" ${!theoryAction.enabled || state.action ? "disabled" : ""}>
+              ${state.action ? "Anmeldung läuft..." : escapeHtml(theoryAction.buttonLabel)}
             </button>
           </form>
         </div>
@@ -2381,14 +2743,14 @@ function renderExamRegistrationView() {
               <p class="eyebrow">Praxisprüfung</p>
               <h3>Anmelden</h3>
             </div>
-            ${renderBooleanBadge(practiceUnlocked, "Anmeldung möglich", "Mindestflugstunden fehlen")}
+            ${renderBadge(practiceAction.hint, practiceAction.enabled ? "success" : practiceAction.repeat ? "warning" : "neutral")}
           </div>
           <form id="practiceExamForm" class="form-grid single">
             <label>Wunschtermin<input name="wunschtermin" type="date" value="${todayDate(10)}" required></label>
             <label>Prüfer<input name="pruefer" placeholder="P002"></label>
-            <label>Bemerkung<textarea name="bemerkung" rows="2" placeholder="Erstanmeldung"></textarea></label>
-            <button class="button primary" type="submit" ${!practiceUnlocked || state.action ? "disabled" : ""}>
-              ${state.action ? "Anmeldung läuft..." : "Praxisprüfung anmelden"}
+            <label>Bemerkung<textarea name="bemerkung" rows="2" placeholder="${practiceAction.repeat ? "Wiederholungsanmeldung" : "Erstanmeldung"}"></textarea></label>
+            <button class="button primary" type="submit" ${!practiceAction.enabled || state.action ? "disabled" : ""}>
+              ${state.action ? "Anmeldung läuft..." : escapeHtml(practiceAction.buttonLabel)}
             </button>
           </form>
         </div>
@@ -2550,7 +2912,7 @@ function renderStudentCompletionView() {
           ${renderBadge(abschluss.label, abschluss.tone)}
         </div>
         <dl class="details">
-          <div><dt>Abschlussanfrage</dt><dd>${renderBadge(abschlussStatusLabel(requestStatus), abschluss.tone)}</dd></div>
+          <div><dt>Abschlussanfrage</dt><dd><span class="badge-row">${renderBadge(abschlussStatusLabel(requestStatus), abschluss.tone)} <code>${escapeHtml(requestStatus)}</code></span></dd></div>
           <div><dt>Theorie-Abnahmekriterien</dt><dd>${renderBooleanBadge(request.theorieKriterienErfuellt, "Erfüllt", "Offen")}</dd></div>
           <div><dt>Praxis-Abnahmekriterien</dt><dd>${renderBooleanBadge(request.praxisKriterienErfuellt, "Erfüllt", "Offen")}</dd></div>
           <div><dt>Bestätigung möglich</dt><dd>${renderBooleanBadge(request.bestaetigungMoeglich, "Ja", "Nein")}</dd></div>
@@ -2681,14 +3043,14 @@ function practicePayload(values) {
 
   const aircraft = aircraftById(values.flugzeugId);
   if (!aircraft || !aircraft.available) {
-    throw new Error("Bitte ein einsatzbereites Flugzeug ohne Wartungshinweis auswaehlen.");
+    const reason = aircraft ? `${aircraft.status}; ${aircraft.maintenance}` : "nicht vorhanden";
+    throw new Error(`Flugzeug ${values.flugzeugId || "-"} ist nicht buchbar (${reason}). Bitte ${PRACTICE_DEFAULTS.aircraftId} auswählen oder die Standardwerte zurücksetzen.`);
   }
 
   const route = `${values.startFlughafen} → ${values.zielFlughafen}`;
   const notes = values.notizen ? `${values.notizen} | Route: ${route}` : `Route: ${route}`;
 
   return {
-    schuelerId: ensureStudentId(),
     flugzeugId: values.flugzeugId,
     fluglehrer: values.fluglehrer,
     termin: `${values.datum}T${values.startzeit}`,
@@ -2702,9 +3064,14 @@ function practicePayload(values) {
 
 async function handleLogin(form) {
   const values = readForm(form);
+  state.loginCredentials = {
+    username: values.username || "",
+    password: values.password || ""
+  };
   requireFields(values, ["username", "password"]);
 
   await runAction(async () => {
+    resetStudentScope();
     const response = await api("/auth/login", {
       method: "POST",
       body: values
@@ -2716,15 +3083,14 @@ async function handleLogin(form) {
     state.schuelerId = response.schuelerId || "";
     if (state.role === "SCHUELER" && state.schuelerId) {
       state.selectedStudentId = state.schuelerId;
+    } else if (state.role === "SCHUELER") {
+      throw new Error("Dem Schülerkonto ist kein Schülerdatensatz zugeordnet.");
     }
     localStorage.setItem(STORAGE.token, state.token);
     localStorage.setItem(STORAGE.username, state.username);
     localStorage.setItem(STORAGE.displayName, state.displayName);
     localStorage.setItem(STORAGE.role, state.role);
     localStorage.setItem(STORAGE.schuelerId, state.schuelerId);
-    await loadStudents();
-    await loadSelectedStudentData();
-    await loadAbschlussData();
   }, "Login erfolgreich.");
 }
 
@@ -2735,7 +3101,6 @@ async function handleTheoryBooking(form) {
   const values = readForm(form);
   requireFields(values, ["thema", "termin", "dauerMinuten", "dozent"]);
   const body = {
-    schuelerId: ensureStudentId(),
     thema: values.thema,
     termin: values.termin,
     dauerMinuten: positiveInteger(values.dauerMinuten, "dauerMinuten"),
@@ -2793,7 +3158,6 @@ async function handleTheoryExam(form) {
   const values = readForm(form);
   requireFields(values, ["wunschtermin"]);
   const body = {
-    schuelerId: ensureStudentId(),
     pruefungsart: "Theoriepruefung",
     wunschtermin: values.wunschtermin,
     pruefer: values.pruefer || "",
@@ -2808,7 +3172,10 @@ async function handlePracticeBooking(form) {
     throw new Error("Keine Berechtigung für diese Funktion.");
   }
   const body = practicePayload(readForm(form));
-  await runAction(() => api("/praxis/buchen", { method: "POST", body }), "Flugstunde wurde gebucht.");
+  await runAction(async () => {
+    await api("/praxis/buchen", { method: "POST", body });
+    resetPracticeBookingDefaults();
+  }, "Flugstunde wurde gebucht.");
 }
 
 async function handlePracticeExam(form) {
@@ -2818,7 +3185,6 @@ async function handlePracticeExam(form) {
   const values = readForm(form);
   requireFields(values, ["wunschtermin"]);
   const body = {
-    schuelerId: ensureStudentId(),
     pruefungsart: "Praxispruefung",
     wunschtermin: values.wunschtermin,
     pruefer: values.pruefer || "",
@@ -2940,7 +3306,6 @@ async function registerTheoryExamFromContext() {
   }
   state.view = "theory";
   const body = {
-    schuelerId: ensureStudentId(),
     pruefungsart: "Theoriepruefung",
     wunschtermin: todayDate(7),
     pruefer: "",
@@ -2962,7 +3327,6 @@ async function registerPracticeExamFromContext() {
   }
   state.view = "practice";
   const body = {
-    schuelerId: ensureStudentId(),
     pruefungsart: "Praxispruefung",
     wunschtermin: todayDate(10),
     pruefer: "",
@@ -2982,7 +3346,6 @@ async function cancelFlight(flightId) {
     return;
   }
   const body = {
-    schuelerId: ensureStudentId(),
     flugId: flightId,
     grund: reason
   };
@@ -3020,7 +3383,6 @@ async function cancelCourseFromPlanning(courseId) {
 
 async function cancelCourseWithReason(courseId, reason, successMessage) {
   const body = {
-    schuelerId: ensureStudentId(),
     kursId: courseId,
     grund: reason
   };
@@ -3117,7 +3479,6 @@ async function planTheoryFromDrop() {
     return;
   }
   const body = {
-    schuelerId: ensureStudentId(),
     thema: "Planung: Theoriestunde",
     termin: todayDate(1),
     dauerMinuten: 60,
@@ -3144,14 +3505,13 @@ async function planPracticeFromDrop() {
     return;
   }
   const body = {
-    schuelerId: ensureStudentId(),
     flugzeugId: aircraft.id,
     fluglehrer: pilot.id,
     termin: `${todayDate(1)}T10:00`,
     dauerMinuten: 60,
     ausbildungsinhalt: "Planung: Flugstunde",
-    startFlughafen: "EDDV",
-    zielFlughafen: "EDDV",
+    startFlughafen: PRACTICE_DEFAULTS.startAirport,
+    zielFlughafen: PRACTICE_DEFAULTS.destinationAirport,
     notizen: "Aus der Planungsansicht erstellt."
   };
   await runAction(() => api("/praxis/buchen", { method: "POST", body }), "Flugstunde wurde aus der Planung erstellt.");
@@ -3269,7 +3629,35 @@ app.addEventListener("submit", async (event) => {
   }
 });
 
+app.addEventListener("reset", (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || form.id !== "practiceBookingForm") {
+    return;
+  }
+  event.preventDefault();
+  resetPracticeBookingDefaults();
+  setMessage("notice", "Praxisformular wurde auf die sicheren Demo-Standardwerte zurückgesetzt.");
+  render();
+});
+
 app.addEventListener("click", async (event) => {
+  const demoAccountButton = event.target.closest("[data-demo-username][data-demo-password]");
+  if (demoAccountButton) {
+    const form = app.querySelector("#loginForm");
+    if (!form) {
+      return;
+    }
+    const username = demoAccountButton.dataset.demoUsername || "";
+    const password = demoAccountButton.dataset.demoPassword || "";
+    form.elements.username.value = username;
+    form.elements.password.value = password;
+    state.loginCredentials = { username, password };
+    state.error = "";
+    app.querySelector(".login-form-section .alert.error")?.remove();
+    form.querySelector('button[type="submit"]')?.focus();
+    return;
+  }
+
   const menuAction = event.target.closest("[data-menu-action]");
   if (menuAction) {
     if (menuAction.dataset.menuAction === "logout") {
@@ -3345,9 +3733,15 @@ app.addEventListener("click", async (event) => {
       return;
     }
     const aircraft = aircraftById(aircraftButton.dataset.selectAircraft);
-    if (aircraft?.available) {
+    if (aircraft && (aircraft.available || aircraft.id === PRACTICE_NEGATIVE_TEST_AIRCRAFT_ID)) {
       state.practiceSelection.aircraftId = aircraft.id;
       state.modal = null;
+      setMessage(
+        "notice",
+        aircraft.available
+          ? `${aircraft.id} wurde für die Praxisbuchung ausgewählt.`
+          : `${aircraft.id} wurde für den Negativtest ausgewählt und bleibt bei der Buchung gesperrt.`
+      );
       render();
     }
     return;
@@ -3369,7 +3763,7 @@ app.addEventListener("click", async (event) => {
 
   const selectButton = event.target.closest("[data-select-student]");
   if (selectButton) {
-    await selectStudentForView(selectButton.dataset.selectStudent);
+    await selectStudentForView(selectButton.dataset.selectStudent, selectButton.dataset.targetView);
     return;
   }
 
@@ -3608,12 +4002,17 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function init() {
+  if (state.token) {
+    state.loading = true;
+  }
+  render();
+  await loadHealth();
+
   if (!state.token) {
     render();
     return;
   }
 
-  state.loading = true;
   render();
   try {
     const user = await api("/auth/me");

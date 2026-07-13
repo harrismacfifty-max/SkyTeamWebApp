@@ -14,6 +14,7 @@ public final class BackendTestRunner {
         PraxisServiceTest.run(runner);
         PruefungsServiceTest.run(runner);
         AusbildungsstatusServiceTest.run(runner);
+        StoredProcedureContractTest.run(runner);
         runner.summary();
     }
 }

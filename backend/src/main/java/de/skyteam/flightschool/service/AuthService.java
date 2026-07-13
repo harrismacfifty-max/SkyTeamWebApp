@@ -3,38 +3,34 @@ package de.skyteam.flightschool.service;
 import de.skyteam.flightschool.error.UnauthorizedException;
 import de.skyteam.flightschool.model.AuthUser;
 import de.skyteam.flightschool.model.LoginResponse;
-import de.skyteam.flightschool.model.UserRole;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public final class AuthService {
-    private final Map<String, DemoAccount> accounts = Map.of(
-            "demo", new DemoAccount("demo", new AuthUser("demo", "Demo Schüler", UserRole.SCHUELER, "SC901")),
-            "demo2", new DemoAccount("demo2", new AuthUser("demo2", "Demo Schülerverwaltung", UserRole.SCHUELERVERWALTUNG, ""))
-    );
+    private final DemoAccountProvider accountProvider;
     private final ConcurrentMap<String, AuthUser> activeSessions = new ConcurrentHashMap<>();
 
-    public AuthService() {
+    public AuthService(DemoAccountProvider accountProvider) {
+        this.accountProvider = Objects.requireNonNull(accountProvider, "accountProvider");
     }
 
     public LoginResponse login(Map<String, String> data) {
         String requestedUsername = ServiceSupport.required(data, "username");
         String requestedPassword = ServiceSupport.required(data, "password");
-        DemoAccount account = accounts.get(requestedUsername);
-        if (account == null || !account.password().equals(requestedPassword)) {
-            throw new UnauthorizedException("Ungueltige Zugangsdaten.");
-        }
+        AuthUser user = accountProvider.authenticate(requestedUsername, requestedPassword)
+                .orElseThrow(() -> new UnauthorizedException("Ungueltige Zugangsdaten."));
         String token = "session-" + UUID.randomUUID();
-        activeSessions.put(token, account.user());
+        activeSessions.put(token, user);
         return new LoginResponse(
                 token,
-                account.user().username(),
-                account.user().displayName(),
-                account.user().role().name(),
-                account.user().schuelerId()
+                user.username(),
+                user.displayName(),
+                user.role().name(),
+                user.schuelerId()
         );
     }
 
@@ -54,9 +50,6 @@ public final class AuthService {
 
     public boolean isAuthenticated(String token) {
         return currentUser(token).isPresent();
-    }
-
-    private record DemoAccount(String password, AuthUser user) {
     }
 }
 

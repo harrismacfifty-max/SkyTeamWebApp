@@ -1,5 +1,8 @@
 package de.skyteam.flightschool.repository.jdbc;
 
+import de.skyteam.flightschool.error.BusinessConflictException;
+import de.skyteam.flightschool.error.NotFoundException;
+import de.skyteam.flightschool.error.ValidationException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -68,8 +71,28 @@ final class JdbcSupport {
         }
     }
 
-    static IllegalStateException failure(SQLException exception) {
+    static RuntimeException failure(SQLException exception) {
+        int errorCode = Math.abs(exception.getErrorCode());
+        String message = oracleMessage(exception);
+        if (errorCode == 20010 || errorCode == 20011 || errorCode == 20020
+                || errorCode == 20021 || errorCode == 20030) {
+            return new NotFoundException(message);
+        }
+        if (errorCode == 20023) {
+            return new BusinessConflictException(message);
+        }
+        if (errorCode >= 20000 && errorCode <= 20999) {
+            return new ValidationException(message);
+        }
         return new IllegalStateException("Database operation failed.", exception);
     }
-}
 
+    private static String oracleMessage(SQLException exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return "Die Datenbankoperation konnte nicht ausgefuehrt werden.";
+        }
+        String firstLine = message.lines().findFirst().orElse(message).trim();
+        return firstLine.replaceFirst("^ORA-\\d+:\\s*", "");
+    }
+}

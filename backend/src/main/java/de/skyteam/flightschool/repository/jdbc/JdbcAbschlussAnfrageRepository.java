@@ -3,6 +3,7 @@ package de.skyteam.flightschool.repository.jdbc;
 import de.skyteam.flightschool.model.AbschlussAnfrage;
 import de.skyteam.flightschool.model.AbschlussAnfrageStatus;
 import de.skyteam.flightschool.repository.AbschlussAnfrageRepository;
+import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -114,40 +115,15 @@ public final class JdbcAbschlussAnfrageRepository implements AbschlussAnfrageRep
 
     @Override
     public AbschlussAnfrage save(AbschlussAnfrage anfrage) {
-        String sql = """
-                merge into ABSCHLUSS_ANFRAGE target
-                using (
-                    select ? as ID_ABSCHLUSS_ANFRAGE,
-                           ? as ID_SCHUELER,
-                           ? as STATUS,
-                           ? as BEGRUENDUNG,
-                           ? as ANGEFRAGT_AM,
-                           ? as GEPRUEFT_AM
-                    from dual
-                ) source
-                on (target.ID_ABSCHLUSS_ANFRAGE = source.ID_ABSCHLUSS_ANFRAGE)
-                when matched then update set
-                    target.ID_SCHUELER = source.ID_SCHUELER,
-                    target.STATUS = source.STATUS,
-                    target.BEGRUENDUNG = source.BEGRUENDUNG,
-                    target.ANGEFRAGT_AM = source.ANGEFRAGT_AM,
-                    target.GEPRUEFT_AM = source.GEPRUEFT_AM
-                when not matched then insert (
-                    ID_ABSCHLUSS_ANFRAGE, ID_SCHUELER, STATUS, BEGRUENDUNG, ANGEFRAGT_AM, GEPRUEFT_AM
-                ) values (
-                    source.ID_ABSCHLUSS_ANFRAGE, source.ID_SCHUELER, source.STATUS,
-                    source.BEGRUENDUNG, source.ANGEFRAGT_AM, source.GEPRUEFT_AM
-                )
-                """;
         try (Connection connection = connections.open();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.ABSCHLUSS_ANFRAGE_SPEICHERN)) {
             statement.setString(1, anfrage.id());
             statement.setString(2, anfrage.schuelerId());
             statement.setString(3, anfrage.status().name());
             statement.setString(4, anfrage.begruendung());
             statement.setTimestamp(5, JdbcSupport.timestamp(anfrage.angefragtAm()));
             statement.setTimestamp(6, JdbcSupport.timestamp(anfrage.geprueftAm()));
-            statement.executeUpdate();
+            statement.execute();
             return anfrage;
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);

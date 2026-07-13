@@ -34,6 +34,8 @@ import de.skyteam.flightschool.service.SchuelerService;
 import de.skyteam.flightschool.service.StudentService;
 import de.skyteam.flightschool.service.TheorieService;
 import java.io.IOException;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -140,6 +142,7 @@ public final class ApiHandler implements HttpHandler {
         }
 
         AuthUser currentUser = requireAuthenticated(exchange);
+        requireQuerySchuelerAccess(exchange, currentUser);
 
         if ("GET".equals(method) && "/api/dashboard".equals(path)) {
             HttpSupport.sendResponse(exchange, 200, ApiJson.success("Dashboard geladen.", ApiJson.dashboard(dashboardService.dashboard())));
@@ -148,11 +151,63 @@ public final class ApiHandler implements HttpHandler {
 
         String[] segments = segments(path);
 
+        if ("GET".equals(method) && "/api/schueler/me".equals(path)) {
+            requireRole(currentUser, UserRole.SCHUELER);
+            String schuelerId = requireOwnSchuelerId(currentUser);
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "Eigener Schuelerdatensatz geladen.",
+                    ApiJson.schueler(schuelerService.findById(schuelerId))
+            ));
+            return;
+        }
+
+        if ("GET".equals(method) && "/api/status/me".equals(path)) {
+            requireRole(currentUser, UserRole.SCHUELER);
+            String schuelerId = requireOwnSchuelerId(currentUser);
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "Eigener Ausbildungsstatus berechnet.",
+                    ApiJson.ausbildungsStatus(ausbildungsstatusService.status(schuelerId))
+            ));
+            return;
+        }
+
+        if ("GET".equals(method) && "/api/theorie/me".equals(path)) {
+            requireRole(currentUser, UserRole.SCHUELER);
+            String schuelerId = requireOwnSchuelerId(currentUser);
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "Eigene Theorie geladen.",
+                    ApiJson.theorieDetails(theorieService.fortschritt(schuelerId), theorieService.kurse(schuelerId))
+            ));
+            return;
+        }
+
+        if ("GET".equals(method) && "/api/praxis/me".equals(path)) {
+            requireRole(currentUser, UserRole.SCHUELER);
+            String schuelerId = requireOwnSchuelerId(currentUser);
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "Eigene Praxis geladen.",
+                    ApiJson.praxisDetails(praxisService.fortschritt(schuelerId), praxisService.fluege(schuelerId))
+            ));
+            return;
+        }
+
+        if ("GET".equals(method) && "/api/pruefung/me".equals(path)) {
+            requireRole(currentUser, UserRole.SCHUELER);
+            String schuelerId = requireOwnSchuelerId(currentUser);
+            HttpSupport.sendResponse(exchange, 200, ApiJson.success(
+                    "Eigene Pruefungen geladen.",
+                    ApiJson.pruefungen(pruefungsService.pruefungen(schuelerId))
+            ));
+            return;
+        }
+
         if ("POST".equals(method) && "/api/abschluss/anfragen".equals(path)) {
             requireRole(currentUser, UserRole.SCHUELER);
+            Map<String, String> body = JsonUtil.parseObject(HttpSupport.readBody(exchange));
+            String schuelerId = requireSessionSchuelerId(currentUser, body);
             HttpSupport.sendResponse(exchange, 201, ApiJson.success(
                     "Abschlussanfrage gestellt.",
-                    ApiJson.abschlussAnfrageDto(abschlussService.requestAbschluss(requireOwnSchuelerId(currentUser)))
+                    ApiJson.abschlussAnfrageDto(abschlussService.requestAbschluss(schuelerId))
             ));
             return;
         }
@@ -335,8 +390,8 @@ public final class ApiHandler implements HttpHandler {
 
         if ("POST".equals(method) && "/api/theorie/buchen".equals(path)) {
             requireRole(currentUser, UserRole.SCHUELER);
-            TheorieBuchungRequest request = theorieRequest(JsonUtil.parseObject(HttpSupport.readBody(exchange)));
-            requireSchuelerReadAccess(currentUser, request.schuelerId());
+            Map<String, String> body = JsonUtil.parseObject(HttpSupport.readBody(exchange));
+            TheorieBuchungRequest request = theorieRequest(requireSessionSchuelerId(currentUser, body), body);
             Kurs kurs = theorieService.bucheTheoriekurs(request);
             HttpSupport.sendResponse(exchange, 201, ApiJson.success("Theoriekurs gebucht.", ApiJson.kurs(kurs)));
             return;
@@ -344,8 +399,8 @@ public final class ApiHandler implements HttpHandler {
 
         if ("POST".equals(method) && "/api/theorie/stornieren".equals(path)) {
             requireRole(currentUser, UserRole.SCHUELER);
-            TheorieStornierungRequest request = theorieStornierungRequest(JsonUtil.parseObject(HttpSupport.readBody(exchange)));
-            requireSchuelerReadAccess(currentUser, request.schuelerId());
+            Map<String, String> body = JsonUtil.parseObject(HttpSupport.readBody(exchange));
+            TheorieStornierungRequest request = theorieStornierungRequest(requireSessionSchuelerId(currentUser, body), body);
             HttpSupport.sendResponse(exchange, 200, ApiJson.success(
                     "Theoriekurs storniert.",
                     ApiJson.theorieStornierung(theorieService.storniereTheoriekurs(request))
@@ -364,8 +419,8 @@ public final class ApiHandler implements HttpHandler {
 
         if ("POST".equals(method) && "/api/praxis/buchen".equals(path)) {
             requireRole(currentUser, UserRole.SCHUELER);
-            PraxisBuchungRequest request = praxisRequest(JsonUtil.parseObject(HttpSupport.readBody(exchange)));
-            requireSchuelerReadAccess(currentUser, request.schuelerId());
+            Map<String, String> body = JsonUtil.parseObject(HttpSupport.readBody(exchange));
+            PraxisBuchungRequest request = praxisRequest(requireSessionSchuelerId(currentUser, body), body);
             Flug flug = praxisService.bucheFlugstunde(request);
             HttpSupport.sendResponse(exchange, 201, ApiJson.success("Praxisflugstunde gebucht.", ApiJson.flug(flug)));
             return;
@@ -373,8 +428,8 @@ public final class ApiHandler implements HttpHandler {
 
         if ("POST".equals(method) && "/api/praxis/stornieren".equals(path)) {
             requireRole(currentUser, UserRole.SCHUELER);
-            PraxisStornierungRequest request = praxisStornierungRequest(JsonUtil.parseObject(HttpSupport.readBody(exchange)));
-            requireSchuelerReadAccess(currentUser, request.schuelerId());
+            Map<String, String> body = JsonUtil.parseObject(HttpSupport.readBody(exchange));
+            PraxisStornierungRequest request = praxisStornierungRequest(requireSessionSchuelerId(currentUser, body), body);
             HttpSupport.sendResponse(exchange, 200, ApiJson.success(
                     "Praxisflugstunde storniert.",
                     ApiJson.praxisStornierung(praxisService.storniereFlugstunde(request))
@@ -390,8 +445,8 @@ public final class ApiHandler implements HttpHandler {
 
         if ("POST".equals(method) && "/api/pruefung/theorie/anmelden".equals(path)) {
             requireRole(currentUser, UserRole.SCHUELER);
-            PruefungAnmeldungRequest request = pruefungRequest(JsonUtil.parseObject(HttpSupport.readBody(exchange)), "Theoriepruefung");
-            requireSchuelerReadAccess(currentUser, request.schuelerId());
+            Map<String, String> body = JsonUtil.parseObject(HttpSupport.readBody(exchange));
+            PruefungAnmeldungRequest request = pruefungRequest(requireSessionSchuelerId(currentUser, body), body, "Theoriepruefung");
             Pruefung pruefung = pruefungsService.meldeTheoriePruefungAn(request);
             HttpSupport.sendResponse(exchange, 201, ApiJson.success("Theoriepruefung angemeldet.", ApiJson.pruefung(pruefung)));
             return;
@@ -399,8 +454,8 @@ public final class ApiHandler implements HttpHandler {
 
         if ("POST".equals(method) && "/api/pruefung/praxis/anmelden".equals(path)) {
             requireRole(currentUser, UserRole.SCHUELER);
-            PruefungAnmeldungRequest request = pruefungRequest(JsonUtil.parseObject(HttpSupport.readBody(exchange)), "Praxispruefung");
-            requireSchuelerReadAccess(currentUser, request.schuelerId());
+            Map<String, String> body = JsonUtil.parseObject(HttpSupport.readBody(exchange));
+            PruefungAnmeldungRequest request = pruefungRequest(requireSessionSchuelerId(currentUser, body), body, "Praxispruefung");
             Pruefung pruefung = pruefungsService.meldePraxisPruefungAn(request);
             HttpSupport.sendResponse(exchange, 201, ApiJson.success("Praxispruefung angemeldet.", ApiJson.pruefung(pruefung)));
             return;
@@ -588,6 +643,42 @@ public final class ApiHandler implements HttpHandler {
         return user.schuelerId();
     }
 
+    private static String requireSessionSchuelerId(AuthUser user, Map<String, String> body) {
+        String sessionSchuelerId = requireOwnSchuelerId(user);
+        requireMatchingSchuelerId(sessionSchuelerId, body.get("schuelerId"));
+        requireMatchingSchuelerId(sessionSchuelerId, body.get("studentId"));
+        return sessionSchuelerId;
+    }
+
+    private static void requireQuerySchuelerAccess(HttpExchange exchange, AuthUser user) {
+        if (user.role() != UserRole.SCHUELER) {
+            return;
+        }
+        String query = exchange.getRequestURI().getRawQuery();
+        if (query == null || query.isBlank()) {
+            return;
+        }
+        String sessionSchuelerId = requireOwnSchuelerId(user);
+        for (String parameter : query.split("&")) {
+            String[] parts = parameter.split("=", 2);
+            String key = URLDecoder.decode(parts[0], StandardCharsets.UTF_8);
+            if (!"schuelerId".equalsIgnoreCase(key) && !"studentId".equalsIgnoreCase(key)) {
+                continue;
+            }
+            String value = parts.length == 2 ? URLDecoder.decode(parts[1], StandardCharsets.UTF_8) : "";
+            requireMatchingSchuelerId(sessionSchuelerId, value);
+        }
+    }
+
+    private static void requireMatchingSchuelerId(String sessionSchuelerId, String requestedSchuelerId) {
+        if (requestedSchuelerId == null || requestedSchuelerId.isBlank()) {
+            return;
+        }
+        if (!sessionSchuelerId.equals(requestedSchuelerId.trim())) {
+            throw new ForbiddenException("Keine Berechtigung für diese Funktion.");
+        }
+    }
+
     private static String bearerToken(HttpExchange exchange) {
         String authorization = exchange.getRequestHeaders().getFirst("Authorization");
         if (authorization == null || !authorization.startsWith("Bearer ")) {
@@ -619,10 +710,6 @@ public final class ApiHandler implements HttpHandler {
         );
     }
 
-    private static TheorieBuchungRequest theorieRequest(Map<String, String> body) {
-        return theorieRequest(required(body, "schuelerId"), body);
-    }
-
     private static PraxisBuchungRequest praxisRequest(String schuelerId, Map<String, String> body) {
         return new PraxisBuchungRequest(
                 schuelerId,
@@ -635,21 +722,17 @@ public final class ApiHandler implements HttpHandler {
         );
     }
 
-    private static PraxisBuchungRequest praxisRequest(Map<String, String> body) {
-        return praxisRequest(required(body, "schuelerId"), body);
-    }
-
-    private static PraxisStornierungRequest praxisStornierungRequest(Map<String, String> body) {
+    private static PraxisStornierungRequest praxisStornierungRequest(String schuelerId, Map<String, String> body) {
         return new PraxisStornierungRequest(
-                required(body, "schuelerId"),
+                schuelerId,
                 required(body, "flugId"),
                 optional(body, "grund", "")
         );
     }
 
-    private static TheorieStornierungRequest theorieStornierungRequest(Map<String, String> body) {
+    private static TheorieStornierungRequest theorieStornierungRequest(String schuelerId, Map<String, String> body) {
         return new TheorieStornierungRequest(
-                required(body, "schuelerId"),
+                schuelerId,
                 required(body, "kursId"),
                 optional(body, "grund", "")
         );
@@ -663,10 +746,6 @@ public final class ApiHandler implements HttpHandler {
                 optional(body, "pruefer", ""),
                 optional(body, "bemerkung", optional(body, "notizen", ""))
         );
-    }
-
-    private static PruefungAnmeldungRequest pruefungRequest(Map<String, String> body, String fallbackArt) {
-        return pruefungRequest(required(body, "schuelerId"), body, fallbackArt);
     }
 
     private static PruefungsErgebnisRequest pruefungsErgebnisRequest(Map<String, String> body) {

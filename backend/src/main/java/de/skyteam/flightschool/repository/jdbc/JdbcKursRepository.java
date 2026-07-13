@@ -3,10 +3,12 @@ package de.skyteam.flightschool.repository.jdbc;
 import de.skyteam.flightschool.dto.TheorieBuchungRequest;
 import de.skyteam.flightschool.model.Kurs;
 import de.skyteam.flightschool.repository.KursRepository;
+import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,38 +44,17 @@ public final class JdbcKursRepository implements KursRepository {
 
     @Override
     public Kurs createTheorieKurs(TheorieBuchungRequest request) {
-        String insertSql = """
-                insert into KURSE (TYP, LEHRER, TAG, ID_KURS, ID_SCHUELER)
-                values (?, ?, ?, ?, ?)
-                """;
-        String updateHoursSql = """
-                update SCHUELER
-                set THEORIESTUNDE = nvl(THEORIESTUNDE, 0) + ?
-                where ID_SCHUELER = ?
-                """;
-        try (Connection connection = connections.open()) {
-            connection.setAutoCommit(false);
-            String id = JdbcSupport.nextId(connection, "KURSE", "ID_KURS", "KTB");
-            try (PreparedStatement insert = connection.prepareStatement(insertSql);
-                 PreparedStatement updateHours = connection.prepareStatement(updateHoursSql)) {
-                insert.setString(1, request.thema());
-                insert.setString(2, request.dozent());
-                insert.setString(3, request.termin());
-                insert.setString(4, id);
-                insert.setString(5, request.schuelerId());
-                insert.executeUpdate();
-
-                updateHours.setDouble(1, request.dauerMinuten() / 60.0);
-                updateHours.setString(2, request.schuelerId());
-                updateHours.executeUpdate();
-                connection.commit();
-                return new Kurs(id, request.schuelerId(), request.thema(), request.dozent(), request.termin(), request.dauerMinuten());
-            } catch (SQLException exception) {
-                connection.rollback();
-                throw exception;
-            } finally {
-                connection.setAutoCommit(true);
-            }
+        try (Connection connection = connections.open();
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.THEORIE_BUCHEN)) {
+            statement.setString(1, request.schuelerId());
+            statement.setString(2, request.thema());
+            statement.setString(3, request.dozent());
+            statement.setString(4, request.termin());
+            statement.setInt(5, request.dauerMinuten());
+            statement.registerOutParameter(6, Types.VARCHAR);
+            statement.execute();
+            String id = statement.getString(6);
+            return new Kurs(id, request.schuelerId(), request.thema(), request.dozent(), request.termin(), request.dauerMinuten());
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);
         }
@@ -81,37 +62,13 @@ public final class JdbcKursRepository implements KursRepository {
 
     @Override
     public boolean storniereTheorieKurs(String schuelerId, String kursId) {
-        String deleteSql = """
-                delete from KURSE
-                where ID_KURS = ? and ID_SCHUELER = ?
-                """;
-        String updateHoursSql = """
-                update SCHUELER
-                set THEORIESTUNDE = greatest(0, nvl(THEORIESTUNDE, 0) - 1)
-                where ID_SCHUELER = ?
-                """;
-        try (Connection connection = connections.open()) {
-            connection.setAutoCommit(false);
-            try (PreparedStatement delete = connection.prepareStatement(deleteSql);
-                 PreparedStatement updateHours = connection.prepareStatement(updateHoursSql)) {
-                delete.setString(1, kursId);
-                delete.setString(2, schuelerId);
-                boolean deleted = delete.executeUpdate() > 0;
-                if (!deleted) {
-                    connection.rollback();
-                    return false;
-                }
-
-                updateHours.setString(1, schuelerId);
-                updateHours.executeUpdate();
-                connection.commit();
-                return true;
-            } catch (SQLException exception) {
-                connection.rollback();
-                throw exception;
-            } finally {
-                connection.setAutoCommit(true);
-            }
+        try (Connection connection = connections.open();
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.THEORIE_STORNIEREN)) {
+            statement.setString(1, schuelerId);
+            statement.setString(2, kursId);
+            statement.registerOutParameter(3, Types.NUMERIC);
+            statement.execute();
+            return statement.getInt(3) > 0;
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);
         }

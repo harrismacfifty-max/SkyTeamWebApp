@@ -2,6 +2,7 @@ package de.skyteam.flightschool.repository.jdbc;
 
 import de.skyteam.flightschool.model.AusbildungsVertrag;
 import de.skyteam.flightschool.repository.AusbildungsVertragRepository;
+import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -49,40 +50,15 @@ public final class JdbcAusbildungsVertragRepository implements AusbildungsVertra
 
     @Override
     public AusbildungsVertrag save(AusbildungsVertrag vertrag) {
-        String sql = """
-                merge into AUSBILDUNG_VERTRAG target
-                using (
-                    select ? as ID_AUSBILDUNG_VERTRAG,
-                           ? as ID_SCHULE,
-                           ? as STARTZEIT,
-                           ? as ENDZEIT,
-                           ? as STATUS,
-                           ? as NOTIZ
-                    from dual
-                ) source
-                on (target.ID_AUSBILDUNG_VERTRAG = source.ID_AUSBILDUNG_VERTRAG)
-                when matched then update set
-                    target.ID_SCHULE = source.ID_SCHULE,
-                    target.STARTZEIT = source.STARTZEIT,
-                    target.ENDZEIT = source.ENDZEIT,
-                    target.STATUS = source.STATUS,
-                    target.NOTIZ = source.NOTIZ
-                when not matched then insert (
-                    ID_AUSBILDUNG_VERTRAG, ID_SCHULE, STARTZEIT, ENDZEIT, STATUS, NOTIZ
-                ) values (
-                    source.ID_AUSBILDUNG_VERTRAG, source.ID_SCHULE, source.STARTZEIT,
-                    source.ENDZEIT, source.STATUS, source.NOTIZ
-                )
-                """;
         try (Connection connection = connections.open();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.AUSBILDUNGSVERTRAG_SPEICHERN)) {
             statement.setString(1, vertrag.id());
             statement.setString(2, vertrag.schuleId());
             statement.setTimestamp(3, JdbcSupport.timestamp(vertrag.startzeit()));
             statement.setTimestamp(4, JdbcSupport.timestamp(vertrag.endzeit()));
             statement.setString(5, vertrag.status());
             statement.setString(6, vertrag.notiz());
-            statement.executeUpdate();
+            statement.execute();
             return vertrag;
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);
@@ -91,16 +67,11 @@ public final class JdbcAusbildungsVertragRepository implements AusbildungsVertra
 
     @Override
     public void updateStatus(String id, String status) {
-        String sql = """
-                update AUSBILDUNG_VERTRAG
-                set STATUS = ?
-                where ID_AUSBILDUNG_VERTRAG = ?
-                """;
         try (Connection connection = connections.open();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, status);
-            statement.setString(2, id);
-            statement.executeUpdate();
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.AUSBILDUNGSVERTRAG_STATUS)) {
+            statement.setString(1, id);
+            statement.setString(2, status);
+            statement.execute();
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);
         }

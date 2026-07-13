@@ -4,10 +4,12 @@ import de.skyteam.flightschool.dto.PruefungAnmeldungRequest;
 import de.skyteam.flightschool.dto.PruefungsErgebnisRequest;
 import de.skyteam.flightschool.model.Pruefung;
 import de.skyteam.flightschool.repository.PruefungRepository;
+import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,19 +46,17 @@ public final class JdbcPruefungRepository implements PruefungRepository {
 
     @Override
     public Pruefung createPruefung(PruefungAnmeldungRequest request) {
-        String sql = """
-                insert into PRUEFUNG (DATUM, TYP, ID_PRUEFUNG, ID_SCHUELER)
-                values (?, ?, ?, ?)
-                """;
         try (Connection connection = connections.open();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            String id = JdbcSupport.nextId(connection, "PRUEFUNG", "ID_PRUEFUNG", "PRB");
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.PRUEFUNG_ANMELDEN)) {
             LocalDateTime datum = JdbcSupport.parseDateTime(request.wunschtermin());
-            statement.setTimestamp(1, JdbcSupport.timestamp(datum));
+            statement.setString(1, request.schuelerId());
             statement.setString(2, request.pruefungsart());
-            statement.setString(3, id);
-            statement.setString(4, request.schuelerId());
-            statement.executeUpdate();
+            statement.setTimestamp(3, JdbcSupport.timestamp(datum));
+            statement.setString(4, request.pruefer());
+            statement.setString(5, request.bemerkung());
+            statement.registerOutParameter(6, Types.VARCHAR);
+            statement.execute();
+            String id = statement.getString(6);
             return new Pruefung(id, request.schuelerId(), datum, request.pruefungsart());
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);
@@ -65,21 +65,18 @@ public final class JdbcPruefungRepository implements PruefungRepository {
 
     @Override
     public void saveErgebnis(PruefungsErgebnisRequest request) {
-        String sql = """
-                update PRUEFUNG
-                set TYP = ?, DATUM = ?
-                where ID_PRUEFUNG = ?
-                """;
         try (Connection connection = connections.open();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            String status = request.bestanden() ? "bestanden" : "nicht bestanden";
+             CallableStatement statement = connection.prepareCall(JdbcProcedureCalls.PRUEFUNG_ERGEBNIS_SPEICHERN)) {
             String typ = request.pruefungsart() == null || request.pruefungsart().isBlank()
-                    ? "Pruefung - " + status
-                    : request.pruefungsart().trim() + " - " + status;
-            statement.setString(1, typ);
-            statement.setTimestamp(2, JdbcSupport.timestamp(JdbcSupport.parseDateTime(request.datum())));
-            statement.setString(3, request.pruefungId());
-            statement.executeUpdate();
+                    ? "Pruefung"
+                    : request.pruefungsart().trim();
+            statement.setString(1, request.pruefungId());
+            statement.setString(2, typ);
+            statement.setTimestamp(3, JdbcSupport.timestamp(JdbcSupport.parseDateTime(request.datum())));
+            statement.setInt(4, request.bestanden() ? 1 : 0);
+            statement.setString(5, request.ergebnisText());
+            statement.setString(6, request.notizen());
+            statement.execute();
         } catch (SQLException exception) {
             throw JdbcSupport.failure(exception);
         }
@@ -128,4 +125,3 @@ public final class JdbcPruefungRepository implements PruefungRepository {
         );
     }
 }
-

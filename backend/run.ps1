@@ -64,7 +64,7 @@ function Test-BackendStale {
 function Test-TheoryCancellationEndpoint {
     param([int]$Port)
     try {
-        $login = Invoke-RestMethod -Method Post -Uri "http://localhost:$Port/api/auth/login" -ContentType "application/json" -Body '{"username":"demo","password":"demo"}' -TimeoutSec 2
+        $login = Invoke-RestMethod -Method Post -Uri "http://localhost:$Port/api/auth/login" -ContentType "application/json" -Body '{"username":"sc901","password":"demo901"}' -TimeoutSec 2
         $headers = @{ Authorization = "Bearer $($login.data.token)" }
         $body = '{"schuelerId":"__probe__","kursId":"__probe__","grund":"Startpruefung"}'
         Invoke-RestMethod -Method Post -Uri "http://localhost:$Port/api/theorie/stornieren" -Headers $headers -ContentType "application/json" -Body $body -TimeoutSec 2 | Out-Null

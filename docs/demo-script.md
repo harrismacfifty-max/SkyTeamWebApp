@@ -1,132 +1,127 @@
-# Demo-Skript: 5-Minuten-Vorführung
+# Demo-Skript: Abschlusspräsentation
 
-Ziel: Den MVP im Demo-Modus ohne Oracle zeigen und dabei klar zwischen den Rollen `Schüler` und `Schülerverwaltung` unterscheiden.
+Ziel: Im Demo-Modus mehrere fachlich unterschiedliche Schülerzustände und anschließend die Schülerverwaltung zeigen. Jedes Schülerkonto ist fest mit dem angegebenen Schülerdatensatz verbunden und sieht ausschließlich die eigene Ausbildung.
 
 ## Vorbereitung
 
-Empfohlener Start über Docker Compose:
+Vor der Präsentation:
 
-```bash
-cd <projektverzeichnis>
-docker compose up --build
-```
+1. Demo-Daten im Projektverzeichnis bewusst zurücksetzen:
 
-Danach öffnen:
+   ```bash
+   docker compose down -v
+   docker compose up --build
+   ```
+
+   Alternativ unter Windows `.\scripts\reset-demo.ps1` oder unter macOS/Linux `./scripts/reset-demo.sh` ausführen.
+
+2. Anwendung vollständig starten lassen und warten, bis Frontend und Backend erreichbar sind:
+
+   ```text
+   Frontend: http://localhost:8081
+   Backend:  http://localhost:8080/api/health
+   ```
+
+3. Health-Endpoint prüfen. Erwartet sind `activeProfile: demo`, ein erreichbares Backend und im Header `API: online`, `Profil: Demo`, `Datenbankmodus: InMemory`:
+
+   ```bash
+   curl http://localhost:8080/api/health
+   ```
+
+4. Die für den Vortrag empfohlenen Logins `sc901/demo901`, `sc903/demo903`, `sc906/demo906` und `demo2/demo2` kurz testen und jeweils wieder abmelden.
+5. In der Schülerverwaltung prüfen, dass die Anfrage `AA906` für `SC906 Oskar Lange` offen ist und den Status `ANGEFRAGT` hat.
+
+Der Reset löscht nur die persistenten Daten des lokalen Demo-Modus. Oracle-Daten werden nicht berührt.
+
+## Demo-Fall 1: Laufende Ausbildung und blockierte Prüfung
+
+Login: `sc901` / `demo901` → `SC901 Jonas Keller`
+
+1. Im Dashboard Name, Schüler-ID `SC901`, Rolle `SCHUELER` und Ausbildungsstatus `AKTIV` zeigen.
+2. Darauf hinweisen, dass keine Schülerauswahl und keine Verwaltungsfunktion sichtbar ist.
+3. Fehlende Mindeststunden in Theorie und Praxis zeigen.
+4. `Prüfung anmelden` öffnen beziehungsweise die deaktivierte Anmeldung zeigen.
+5. Erwartung: Die Prüfungsanmeldung ist wegen fehlender Mindeststunden blockiert; ein direkter API-Versuch liefert HTTP `409` mit verständlicher Meldung.
+6. Optional die sichere Praxisvorauswahl `P001`, `FZ002`, `EDDV` → `EDDV` zeigen und eine Praxisstunde buchen.
+7. Optionaler Negativfall: `FZ001` auswählen. Die Buchung bleibt wegen Wartung fachlich blockiert; anschließend wieder `FZ002` auswählen.
+
+Kernaussage: Das Konto kann nur `SC901` sehen und Aktionen werden weiterhin serverseitig fachlich geprüft.
+
+## Demo-Fall 2: Praxisprüfung freigeschaltet
+
+Logout, danach Login: `sc903` / `demo903` → `SC903 Mina Sommer`
+
+1. Prüfen, dass nach dem Kontowechsel ausschließlich `SC903` angezeigt wird.
+2. Den Ausbildungsstatus `PRAXIS_BEREIT` und die erreichten Praxis-Mindeststunden zeigen.
+3. `Prüfung anmelden` öffnen.
+4. Zeigen, dass die Praxisprüfung freigeschaltet und die Theorieprüfung noch nicht freigeschaltet ist.
+5. Optional eine eigene Praxisprüfungsanmeldung durchführen.
+
+Kernaussage: Freigaben werden aus dem fachlichen Zustand des aktuell angemeldeten Schülers abgeleitet.
+
+## Demo-Fall 3: Bestandene Prüfungen und offene Abschlussanfrage
+
+Logout, danach Login: `sc906` / `demo906` → `SC906 Oskar Lange`
+
+1. Prüfen, dass keine Daten von SC903 mehr sichtbar sind.
+2. Im Dashboard zeigen:
+   - Theorie bestanden
+   - Praxis bestanden
+   - Abschlussanfrage `AA906`
+   - Anfragestatus `ANGEFRAGT`
+3. `Abschluss anfragen` öffnen und den bestehenden Status zeigen.
+4. Darauf hinweisen, dass keine zweite identische Abschlussanfrage erzeugt werden kann.
+
+Kernaussage: Der Schüler kann den Abschluss nur anfragen. Bestätigt wird er durch die Schülerverwaltung.
+
+## Demo-Fall 4: Abschluss durch die Schülerverwaltung bestätigen
+
+Logout, danach Login: `demo2` / `demo2` → Rolle `SCHUELERVERWALTUNG`
+
+1. Zeigen, dass `demo2` kein Schülerkonto ist und eine Übersicht über alle Schüler besitzt.
+2. In der Verwaltungsübersicht Schüler-ID, Name, Abschlussstatus sowie Theorie- und Praxiskriterium zeigen.
+3. Prüfen, dass Schüleraktionen wie Theorie-, Praxis- und Prüfungsanmeldung nicht sichtbar sind. Direkte Schüleraktionen liefern serverseitig HTTP `403`.
+4. `Abschlussanfragen prüfen` öffnen.
+5. Anfrage `AA906` für `SC906 Oskar Lange` auswählen.
+6. Status `ANGEFRAGT`, Theoriekriterium `Ja` und Praxiskriterium `Ja` zeigen.
+7. `Bestätigen` klicken.
+8. Prüfen, dass Anfrage und Ausbildungsstatus anschließend `ABGESCHLOSSEN` sind.
+
+Wenn `AA906` bereits bestätigt wurde, vor einem erneuten Vortrag wieder den Demo-Reset ausführen.
+
+## Optionaler Endzustand: Ausbildung abgeschlossen
+
+Login: `sc907` / `demo907` → `SC907 Ella Hartmann`
+
+1. Ausbildungsstatus `ABGESCHLOSSEN` zeigen.
+2. Zeigen, dass neue Buchungen, Prüfungsanmeldungen und Abschlussanfragen deaktiviert sind.
+3. Darauf hinweisen, dass auch ein direkter Versuch, eine neue Abschlussanfrage zu stellen, serverseitig mit HTTP `409` blockiert wird.
+
+## Technischer Bezug
 
 ```text
-Frontend: http://localhost:8081
-Backend:  http://localhost:8080/api/health
-```
+POST /api/auth/login
+GET  /api/auth/me
+POST /api/auth/logout
 
-Lokale Alternativen ohne Docker:
-
-```powershell
-cd <projektverzeichnis>
-.\scripts\start.ps1
-```
-
-```bash
-cd <projektverzeichnis>
-chmod +x scripts/start.sh
-./scripts/start.sh
-```
-
-Demo-Logins:
-
-```text
-Schüler:             demo  / demo
-Schülerverwaltung:   demo2 / demo2
-```
-
-Optionaler Reset der Demo-Daten:
-
-```bash
-docker compose down -v
-docker compose up --build
-```
-
-## Teil 1: Schüler, ca. 2 Minuten
-
-1. Mit `demo/demo` anmelden.
-2. `Main Menu / Dashboard` zeigen.
-3. Begrüßung mit eigenem Schülernamen, Ausbildungsstatus, Theorie-Fortschritt, Praxis-Fortschritt, Prüfungsstatus und Abschlussanfrage-Status zeigen.
-4. Prüfen: Verwaltungsfunktionen wie `Schüler anlegen`, `Schülerdaten prüfen`, `Ausbildungsvertrag prüfen` und `Abschlussanfragen prüfen` sind nicht sichtbar.
-5. `Theorie anmelden` öffnen und eine eigene Theoriestunde buchen.
-6. `Praxis anmelden` öffnen und eine eigene Flugstunde buchen. Geeignete Demo-Werte:
-
-```text
-Fluglehrer: P001
-Flugzeug: FZ002
-Start/Ziel: EDDV
-```
-
-7. `Prüfung anmelden` öffnen. Falls beim eigenen Demo-Schüler noch Mindeststunden fehlen, die fachliche Meldung zeigen.
-8. `Abschluss anfragen` öffnen und die eigene Abschlussanfrage stellen oder den aktuellen Anfragezustand zeigen.
-
-Technischer Bezug:
-
-```text
-POST /api/theorie/buchen
-POST /api/praxis/buchen
-POST /api/pruefung/theorie/anmelden
-POST /api/pruefung/praxis/anmelden
-POST /api/abschluss/anfragen
+GET  /api/schueler/me
+GET  /api/status/me
+GET  /api/theorie/me
+GET  /api/praxis/me
+GET  /api/pruefung/me
 GET  /api/abschluss/meine-anfrage
-```
 
-Wichtige Aussage für die Vorführung: Der Schüler kann den Abschluss nur anfragen. Wirksam wird er erst durch die Schülerverwaltung.
-
-## Teil 2: Schülerverwaltung, ca. 3 Minuten
-
-1. Abmelden und mit `demo2/demo2` anmelden.
-2. `Main Menu / Dashboard` zeigen.
-3. Verwaltungskennzahlen zeigen: Anzahl Schüler, offene Abschlussanfragen, abgelehnte und bestätigte Abschlussanfragen.
-4. BPMN-Prozesspunkte im Verwaltungsdashboard zeigen:
-
-```text
-Schülerdaten prüfen
-Ausbildungsvertrag prüfen
-Schüler anlegen
-Beantragung des Schülers vorhanden?
-Abnahmekriterien Theorie überprüfen
-Abnahmekriterien Praxis überprüfen
-Schüler Abschluss bestätigen
-```
-
-5. `Selbstverwaltung` öffnen.
-6. `Schüler anlegen` öffnen und einen Demo-Schüler anlegen.
-7. `Schülerdaten prüfen` öffnen, nach einem Schüler suchen und Details anzeigen.
-8. `Ausbildungsvertrag prüfen` öffnen und einen Vertrag als geprüft markieren.
-9. `Abschlussanfragen prüfen` öffnen.
-10. Demo-Anfrage `AA906` für `SC906 Oskar Lange` öffnen.
-11. Theorie- und Praxis-Abnahmekriterien zeigen.
-12. `Bestätigen` klicken und damit den BPMN-Schritt `Schüler Abschluss bestätigen` ausführen.
-13. Prüfen: Theorie-, Praxis- und Prüfungsanmeldung sind für `demo2/demo2` nicht sichtbar.
-
-Technischer Bezug:
-
-```text
 GET  /api/verwaltung/schueler
-POST /api/verwaltung/schueler
-GET  /api/verwaltung/schueler/{id}
-GET  /api/verwaltung/schueler/{id}/vertrag
-POST /api/verwaltung/schueler/{id}/vertrag/pruefen
-GET  /api/verwaltung/abschlussanfragen
 GET  /api/verwaltung/abschlussanfragen/{id}
 POST /api/verwaltung/abschlussanfragen/{id}/bestaetigen
-POST /api/verwaltung/abschlussanfragen/{id}/ablehnen
 ```
-
-Wenn `AA906` bereits bestätigt wurde, die Demo-Daten zurücksetzen oder eine neue Abschlussanfrage über den Schülerlauf stellen. Nicht erfüllte Abnahmekriterien können über `Ablehnen` als fachlicher Gegenfall gezeigt werden.
 
 ## Abschluss
 
 Kurz zusammenfassen:
 
-- Logo und Header nutzen `frontend/assets/logo.png`.
-- Die Navigation ist rollenbasiert.
-- Schüler führen nur eigene Ausbildungsaktionen aus.
-- Schülerverwaltung führt Verwaltungs- und Abschlussprüfungen aus.
-- Backend schützt die Rollen zusätzlich serverseitig mit `403`.
-- BPMN wird bewusst als HTML/CSS-Prozessanzeige statt als BPMN-Renderer dargestellt.
-- Demo-Modus funktioniert ohne Oracle; Oracle bleibt über `APP_PROFILE=oracle` vorbereitet.
+- Sieben Schülerkonten zeigen sieben definierte Ausbildungszustände.
+- Jedes Schülerkonto ist serverseitig auf den eigenen Datensatz begrenzt.
+- Schülerverwaltung und Schüleraktionen sind rollenbasiert getrennt.
+- Fachliche Konflikte liefern verständliche Antworten statt Stacktraces.
+- Der Demo-Modus funktioniert ohne Oracle; Oracle bleibt über `APP_PROFILE=oracle` vorbereitet.
